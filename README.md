@@ -63,27 +63,38 @@ make
 
 ```bash
 # 网线连接机器人，设置同网段 IP
-sudo ip addr add 192.168.123.100/24 dev eth0
+sudo ip addr add 192.168.123.100/24 dev eno0
 ping 192.168.123.161  # 测试连通
+```
+
+查看网卡名：
+
+```bash
+ip -br a
 ```
 
 ### 连接测试
 
 ```bash
-./build/test_connection eth0
+./build/test_connection
+# 或指定网卡
+./build/test_connection eno0
 ```
 
 ### 执行动作
 
 ```bash
-# 作揖
-./build/csv_replay eth0 assets/zuoyi.csv
-
-# 打招呼
-./build/csv_replay eth0 assets/wave.csv
+# 默认网卡 eno0（推荐）
+./build/csv_replay assets/zuoyi.csv
 
 # 指定帧率
-./build/csv_replay eth0 assets/zuoyi.csv 50
+./build/csv_replay assets/zuoyi.csv 50
+
+# 指定网卡
+./build/csv_replay assets/wave.csv 60 eno0
+
+# 兼容旧参数顺序
+./build/csv_replay eno0 assets/zuoyi.csv
 ```
 
 ## 控制原理
@@ -131,9 +142,31 @@ LAFAN1 retargeting 格式，每行 36 列，无表头：
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `net` | 网卡名 | 必填 |
+| `net` | 网卡名 | eno0 |
 | `csv` | CSV 文件路径 | 必填 |
 | `fps` | 控制帧率 | 60 |
+
+## 常见问题
+
+### 启动时报错: libddsc.so.0 not found
+
+现象：
+
+```bash
+./build/csv_replay: error while loading shared libraries: libddsc.so.0: cannot open shared object file
+```
+
+原因：
+- SDK 目录里有 `libddsc.so` / `libddscxx.so`，但运行时需要 `libddsc.so.0` / `libddscxx.so.0`。
+
+修复：
+
+```bash
+cd build
+cmake ..
+```
+
+本项目的 CMake 会在配置阶段自动创建 `.so.0` 软链接，执行一次 `cmake ..` 即可。
 
 ## 安全
 

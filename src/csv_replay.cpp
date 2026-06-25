@@ -1,8 +1,9 @@
 // G1 Upper-Body CSV Motion Replay
 // Sends keyframes to robot via rt/arm_sdk with weight mechanism.
 //
-// Usage: ./csv_replay <net> <csv> [fps]
-//        ./csv_replay eth0 motion.csv 60
+// Usage: ./csv_replay <csv> [fps] [net]
+//        ./csv_replay <net> <csv> [fps]  (backward compatible)
+//        default net is eno0
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
+#include <mutex>
 
 static const std::string kTopicArmSDK = "rt/arm_sdk";
 static const std::string kTopicState = "rt/lowstate";
@@ -66,14 +68,46 @@ std::vector<CsvFrame> LoadCsv(const std::string& path) {
 }
 
 int main(int argc, char const* argv[]) {
-    if (argc < 3) {
-        std::cout << "Usage: " << argv[0] << " <net> <csv> [fps]" << std::endl;
+    auto is_csv_path = [](const std::string& s) {
+        return s.size() >= 4 && s.substr(s.size() - 4) == ".csv";
+    };
+
+    if (argc < 2) {
+        std::cout << "Usage: " << argv[0] << " <csv> [fps] [net]" << std::endl;
+        std::cout << "   or: " << argv[0] << " <net> <csv> [fps]" << std::endl;
+        std::cout << "Default net: eno0" << std::endl;
         return 1;
     }
-    std::string net = argv[1];
-    std::string csv_path = argv[2];
+
+    std::string net = "eno0";
+    std::string csv_path;
     float fps = 60.0f;
-    for (int i = 3; i < argc; i++) { try { fps = std::stof(argv[i]); } catch (...) {} }
+
+    // New mode: <csv> [fps] [net]
+    if (is_csv_path(argv[1])) {
+        csv_path = argv[1];
+        if (argc >= 3) {
+            try {
+                fps = std::stof(argv[2]);
+                if (argc >= 4) net = argv[3];
+            } catch (...) {
+                net = argv[2];
+            }
+        }
+    } else {
+        // Backward-compatible mode: <net> <csv> [fps]
+        if (argc < 3 || !is_csv_path(argv[2])) {
+            std::cout << "Usage: " << argv[0] << " <csv> [fps] [net]" << std::endl;
+            std::cout << "   or: " << argv[0] << " <net> <csv> [fps]" << std::endl;
+            std::cout << "Default net: eno0" << std::endl;
+            return 1;
+        }
+        net = argv[1];
+        csv_path = argv[2];
+        if (argc >= 4) {
+            try { fps = std::stof(argv[3]); } catch (...) {}
+        }
+    }
 
     auto frames = LoadCsv(csv_path);
     if (frames.empty()) return 1;
@@ -87,8 +121,10 @@ int main(int argc, char const* argv[]) {
 
     unitree_hg::msg::dds_::LowState_ state_msg;
     std::atomic<bool> ok{false};
+    std::mutex state_mutex;
     auto state_sub = std::make_shared<unitree::robot::ChannelSubscriber<unitree_hg::msg::dds_::LowState_>>(kTopicState);
     state_sub->InitChannel([&](const void* msg) {
+        std::lock_guard<std::mutex> lk(state_mutex);
         memcpy(&state_msg, msg, sizeof(unitree_hg::msg::dds_::LowState_));
         ok = true;
     }, 1);
@@ -103,25 +139,68 @@ int main(int argc, char const* argv[]) {
     }
     std::cout << "Connected." << std::endl;
 
-    // Read current positions
+    // Read current positions (protected by state_mutex)
     std::array<float, 17> cur{};
-    for (int i = 0; i < 17; i++) cur[i] = state_msg.motor_state().at(kArmJoints[i]).q();
+    {
+        std::lock_guard<std::mutex> lk(state_mutex);
+        for (int i = 0; i < 17; i++) cur[i] = state_msg.motor_state().at(kArmJoints[i]).q();
+    }
 
     unitree_hg::msg::dds_::LowCmd_ cmd;
     float dt = 1.0f / fps;
     float max_delta = kMaxVel / fps;
     auto sleep_us = std::chrono::microseconds(static_cast<int>(dt * 1000000));
-    float weight = 0.0f;
+    std::atomic<float> weight{0.0f};
     float dw = 0.2f * dt;
 
+    // For asynchronous checking: remember last commanded positions and expose weight
+    std::array<float, 17> last_cmd_pos{};
+    std::mutex last_cmd_mutex;
+    std::atomic<bool> monitor_running{true};
+
+    // Monitor thread: periodically compare last commanded positions to actual state
+    auto monitor = std::thread([&]() {
+        using namespace std::chrono_literals;
+        while (monitor_running.load()) {
+            std::array<float, 17> state_pos{};
+            {
+                std::lock_guard<std::mutex> lk(state_mutex);
+                for (int i = 0; i < 17; i++) state_pos[i] = state_msg.motor_state().at(kArmJoints[i]).q();
+            }
+            std::array<float, 17> cmd_copy{};
+            {
+                std::lock_guard<std::mutex> lk(last_cmd_mutex);
+                cmd_copy = last_cmd_pos;
+            }
+            float w = weight.load();
+            float max_diff = 0.0f;
+            for (int i = 0; i < 17; i++) {
+                float d = std::abs(state_pos[i] - cmd_copy[i]);
+                if (d > max_diff) max_diff = d;
+            }
+            if (max_diff > 0.05f) {
+                std::cout << "[DEBUG] State mismatch detected: max_delta=" << max_diff
+                          << " weight=" << w << std::endl;
+            } else {
+                // occasional low-verbosity debug
+            }
+            std::this_thread::sleep_for(200ms);
+        }
+    });
+
     auto send = [&](const std::array<float, 17>& pos) {
-        cmd.motor_cmd().at(kNotUsedJoint).q(weight);
+        float w = weight.load();
+        cmd.motor_cmd().at(kNotUsedJoint).q(w);
         for (int j = 0; j < 17; j++) {
             cmd.motor_cmd().at(kArmJoints[j]).q(pos[j]);
             cmd.motor_cmd().at(kArmJoints[j]).dq(0);
             cmd.motor_cmd().at(kArmJoints[j]).kp(kKp);
             cmd.motor_cmd().at(kArmJoints[j]).kd(kKd);
             cmd.motor_cmd().at(kArmJoints[j]).tau(0);
+        }
+        {
+            std::lock_guard<std::mutex> lk(last_cmd_mutex);
+            last_cmd_pos = pos;
         }
         arm_pub->Write(cmd);
     };
@@ -141,7 +220,7 @@ int main(int argc, char const* argv[]) {
     std::array<float, 17> cmd_pos = cur;
 
     for (int i = 0; i < (int)(2.0f / dt); i++) {
-        weight = std::clamp(weight + dw, 0.0f, 1.0f);
+        weight = std::clamp(weight.load() + dw, 0.0f, 1.0f);
         for (int j = 0; j < 17; j++) {
             float d = std::clamp(target[j] - cmd_pos[j], -max_delta, max_delta);
             cmd_pos[j] += d;
@@ -172,14 +251,31 @@ int main(int argc, char const* argv[]) {
 
     // Phase 4: Disengage
     std::cout << "Disengaging..." << std::endl;
+    // Phase 4a: Smoothly move back to initial positions to avoid sudden "clack"
+    std::cout << "Returning to initial posture..." << std::endl;
     for (int i = 0; i < (int)(2.0f / dt); i++) {
-        weight = std::clamp(weight - dw, 0.0f, 1.0f);
-        cmd.motor_cmd().at(kNotUsedJoint).q(weight);
-        arm_pub->Write(cmd);
+        for (int j = 0; j < 17; j++) {
+            float d = std::clamp(cur[j] - cmd_pos[j], -max_delta, max_delta);
+            cmd_pos[j] += d;
+        }
+        send(cmd_pos);
         std::this_thread::sleep_for(sleep_us);
     }
-    cmd.motor_cmd().at(kNotUsedJoint).q(0);
-    arm_pub->Write(cmd);
+
+    // Phase 4b: Ramp down weight while holding safe positions
+    std::cout << "Disengaging (ramp down) ..." << std::endl;
+    for (int i = 0; i < (int)(2.0f / dt); i++) {
+        weight = std::clamp(weight.load() - dw, 0.0f, 1.0f);
+        // keep sending current cmd_pos while weight changes
+        send(cmd_pos);
+        std::this_thread::sleep_for(sleep_us);
+    }
+    weight = 0.0f;
+    send(cmd_pos);
+
+    // stop monitor thread and join
+    monitor_running = false;
+    if (monitor.joinable()) monitor.join();
 
     std::cout << "Robot returned to built-in control." << std::endl;
     return 0;
