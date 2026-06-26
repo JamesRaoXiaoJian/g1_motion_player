@@ -39,3 +39,7 @@ target_link_libraries(csv_replay unitree_sdk2)
 # test_connection: minimal connection test
 add_executable(test_connection src/test_connection.cpp)
 target_link_libraries(test_connection unitree_sdk2)
+
+# state_recorder: record robot joint states to CSV
+add_executable(state_recorder src/state_recorder.cpp)
+target_link_libraries(state_recorder unitree_sdk2)
