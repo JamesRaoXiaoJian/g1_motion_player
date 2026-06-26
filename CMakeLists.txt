@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Unitree SDK bundles CycloneDDS libs as .so files, but SONAME requires .so.0.
-# Create missing SONAME symlinks so runtime linker can resolve dependencies.
+# Create symlinks in BUILD dir (not in submodule) to avoid dirtying the submodule.
 set(UNITREE_DDS_LIB_DIR "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
 	set(UNITREE_DDS_LIB_DIR "${CMAKE_SOURCE_DIR}/thirdparty/unitree_sdk2/thirdparty/lib/x86_64")
@@ -16,17 +16,14 @@ endif()
 if(UNITREE_DDS_LIB_DIR)
 	foreach(lib_name IN ITEMS ddsc ddscxx)
 		set(lib_so "${UNITREE_DDS_LIB_DIR}/lib${lib_name}.so")
-		set(lib_soname "${UNITREE_DDS_LIB_DIR}/lib${lib_name}.so.0")
+		set(lib_soname "${CMAKE_BINARY_DIR}/lib${lib_name}.so.0")
+		# Create relative symlink in build dir pointing to source .so
 		if(EXISTS "${lib_so}" AND NOT EXISTS "${lib_soname}")
-			execute_process(
-				COMMAND "${CMAKE_COMMAND}" -E create_symlink "${lib_so}" "${lib_soname}"
-				RESULT_VARIABLE symlink_result
-			)
-			if(NOT symlink_result EQUAL 0)
-				message(WARNING "Failed to create symlink: ${lib_soname} -> ${lib_so}")
-			endif()
+			file(CREATE_LINK "${lib_so}" "${lib_soname}" SYMBOLIC)
 		endif()
 	endforeach()
+	# Tell linker to look in build dir for .so.0 at runtime
+	link_directories("${CMAKE_BINARY_DIR}")
 endif()
 
 # Unitree SDK (submodule)

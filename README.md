@@ -9,10 +9,13 @@ g1_motion_player/
 ├── CMakeLists.txt
 ├── src/
 │   ├── csv_replay.cpp          # 主程序：CSV 关键帧回放
+│   ├── state_recorder.cpp      # 状态录制工具：全流程录制
 │   └── test_connection.cpp     # 连接测试
 ├── assets/
 │   ├── zuoyi.csv               # 作揖动作（600帧，10秒）
 │   └── wave.csv                # 打招呼动作（600帧，10秒）
+├── docs/
+│   └── initial_pose_analysis.md # 初值分析报告
 ├── thirdparty/
 │   └── unitree_sdk2/           # 宇树 SDK（git submodule）
 └── README.md
@@ -55,7 +58,7 @@ cmake ..
 make
 ```
 
-产物：`build/csv_replay` 和 `build/test_connection`
+产物：`build/csv_replay`、`build/state_recorder`、`build/test_connection`
 
 ## 使用
 
@@ -84,18 +87,30 @@ ip -br a
 ### 执行动作
 
 ```bash
-# 默认网卡 eno0（推荐）
+# 默认网卡 eno0，60fps
 ./build/csv_replay assets/zuoyi.csv
 
 # 指定帧率
 ./build/csv_replay assets/zuoyi.csv 50
 
 # 指定网卡
-./build/csv_replay assets/wave.csv 60 eno0
+./build/csv_replay assets/wave.csv 60 eth0
 
 # 兼容旧参数顺序
 ./build/csv_replay eno0 assets/zuoyi.csv
 ```
+
+### 录制全流程状态
+
+录制机器人从站立到动作执行再到恢复的全过程关节状态：
+
+```bash
+./build/state_recorder assets/zuoyi.csv 60 eno0
+```
+
+输出文件自动命名为 `assets/zuoyi_recorded.csv`，格式与输入 CSV 一致（36列 LAFAN1 格式，带表头）。
+
+录制流程：2s 静止 → Engage → Transition → Replay → Disengage → 2s 静止
 
 ## 控制原理
 
@@ -108,15 +123,25 @@ Motor_real = weight × User_Cmd + (1 - weight) × BuiltIn_Cmd
 执行流程：
 
 ```
-① 连接 DDS
-② 读取当前关节角度
-③ weight 0→1（1秒，接管上肢控制）
-④ 平滑过渡到 CSV 首帧（2秒，速度钳位 0.5 rad/s）
-⑤ 逐帧回放关键帧（默认 60Hz）
-⑥ weight 1→0（2秒，交还内置控制）
+① 连接 DDS，读取所有关节当前位置
+② weight 0→1.0（1秒，接管上肢控制，下肢保持初始位置）
+③ 平滑过渡到 CSV 首帧（2秒，速度钳位 0.5 rad/s）
+④ 逐帧回放关键帧（默认 60Hz，速度钳位 0.8 rad/s）
+⑤ 平滑回到初始姿态（2秒）
+⑥ weight 1.0→0（2秒，交还内置控制）
 ```
 
 不需要机器人处于 PASSIVE 模式，站着就能用。
+
+### 关键参数
+
+| 参数 | 值 | 说明 |
+|------|----|------|
+| `kKp` / `kKd` | 120.0 / 3.0 | PD 增益（高于官方60/1.5，提高跟踪精度） |
+| `kLegKp` / `kLegKd` | 20.0 / 1.0 | 下肢保持增益（低增益，仅维持位置） |
+| `kTransitionMaxVel` | 0.5 rad/s | Transition 阶段速度钳位 |
+| `kReplayMaxVel` | 0.8 rad/s | Replay 阶段速度钳位 |
+| `kFinalWeightTarget` | 1.0 | 完全接管上肢控制 |
 
 ## CSV 格式
 
@@ -148,29 +173,61 @@ LAFAN1 retargeting 格式，每行 36 列，无表头：
 
 ## 常见问题
 
-### 启动时报错: libddsc.so.0 not found
-
-现象：
+### libddsc.so.0 not found
 
 ```bash
-./build/csv_replay: error while loading shared libraries: libddsc.so.0: cannot open shared object file
+./build/csv_replay: error while loading shared libraries: libddsc.so.0
 ```
 
-原因：
-- SDK 目录里有 `libddsc.so` / `libddscxx.so`，但运行时需要 `libddsc.so.0` / `libddscxx.so.0`。
+原因：SDK 目录里有 `libddsc.so` 但运行时需要 `libddsc.so.0`。
 
 修复：
 
 ```bash
-cd build
-cmake ..
+cd build && cmake ..
 ```
 
-本项目的 CMake 会在配置阶段自动创建 `.so.0` 软链接，执行一次 `cmake ..` 即可。
+CMake 会在 `build/` 目录创建 `.so.0` 软链接（不会修改子模块）。
+
+### weight=1.0 时下肢前跑
+
+现象：执行动作时机器人偶尔会往前跑几步。
+
+原因：`rt/arm_sdk` 的 weight 机制是全局的。当 weight=1.0 时，所有关节（包括下肢）都由用户指令控制。如果 `send()` 只设置了上肢关节，下肢关节会收到默认值（0），导致失去平衡。
+
+修复：在 `send()` 中同时发送下肢关节的保持指令，读取初始位置后每帧都以低增益 PD 控制下肢保持原位。
+
+### 动作执行不到位（跟踪误差大）
+
+现象：机器人动作幅度明显小于关键帧指定的幅度。
+
+原因：之前 Replay 阶段有速度钳位（0.5 rad/s），当 CSV 帧间角度变化大时，指令位置永远追不上目标。
+
+修复：
+1. 提高 PD 增益（kp=60→120, kd=1.5→3.0）
+2. Replay 阶段使用更宽松的速度钳位（0.8 rad/s）
+3. weight 从 0.6 提高到 1.0，消除内置控制器的抵抗
+
+### 子模块显示 modified content
+
+现象：`git status` 显示 `thirdparty/unitree_sdk2 (modified content)`。
+
+原因：cmake 在子模块目录内创建了 `.so.0` 软链接或产生了构建残留。
+
+修复：
+
+```bash
+cd thirdparty/unitree_sdk2
+git checkout -- .
+git clean -fd
+cd ../..
+```
+
+预防：CMakeLists.txt 已修改为在 build 目录创建软链接，不再修改子模块。
 
 ## 安全
 
 - 首次运行建议有人在旁边
 - 遥控器 L2+B 急停
-- 速度钳位 0.5 rad/s（与官方一致）
-- PD 增益 kp=60, kd=1.5（与官方一致）
+- 下肢关节始终保持初始位置（低增益 PD 控制）
+- Disengage 阶段先回到初始姿态再释放控制权
