@@ -20,6 +20,7 @@
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
+#include <unitree/robot/g1/loco/g1_loco_client.hpp>
 #include <mutex>
 
 static const std::string kTopicArmSDK = "rt/arm_sdk";
@@ -56,12 +57,22 @@ static const std::array<int, 12> kLegJoints = {
     6, 7, 8, 9, 10, 11,     // right leg
 };
 
-// PD gains — 提高以获得更精准的跟踪
-static constexpr float kKp = 120.0f;
-static constexpr float kKd = 3.0f;
-// Leg joints: lower gains, just holding position
-static constexpr float kLegKp = 20.0f;
-static constexpr float kLegKd = 1.0f;
+// PD gains — 按电机类型设置（参考 g1_ankle_swing_example）
+// GearboxS: Kp=40, Kd=1 (手臂、踝关节、腰Roll/Pitch)
+// GearboxM: Kp=60, Kd=1 (髋关节、腰Yaw)
+// GearboxL: Kp=100, Kd=2 (膝关节)
+static constexpr float kArmKp = 60.0f;    // 手臂 (GearboxS，官方推荐40，略提高)
+static constexpr float kArmKd = 1.5f;
+static constexpr float kWaistYawKp = 80.0f;   // 腰Yaw (GearboxM) — 中等增益
+static constexpr float kWaistYawKd = 2.0f;
+static constexpr float kWaistRollKp = 50.0f;  // 腰Roll/Pitch (GearboxS) — 中等增益
+static constexpr float kWaistRollKd = 1.5f;
+static constexpr float kHipKp = 60.0f;    // 髋关节 (GearboxM)
+static constexpr float kHipKd = 1.0f;
+static constexpr float kKneeKp = 100.0f;  // 膝关节 (GearboxL)
+static constexpr float kKneeKd = 2.0f;
+static constexpr float kAnkleKp = 40.0f;  // 踝关节 (GearboxS)
+static constexpr float kAnkleKd = 1.0f;
 
 // 速度钳位：Transition和Replay阶段都启用，确保稳定
 static constexpr float kTransitionMaxVel = 0.5f;  // rad/s
@@ -172,6 +183,21 @@ int main(int argc, char const* argv[]) {
     }
     std::cout << "Connected." << std::endl;
 
+    // LocoClient: 控制内置运控行为
+    unitree::robot::g1::LocoClient loco;
+    loco.Init();
+    loco.SetTimeout(5.f);
+
+    // 切换到平衡站立模式，减少自动迈步补偿
+    std::cout << "Setting BalanceStand mode..." << std::endl;
+    loco.BalanceStand();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // 降低重心，提高稳定性
+    std::cout << "Lowering stance height..." << std::endl;
+    loco.LowStand();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
     // 读取所有关节当前位置
     std::array<float, 17> cur{};     // 上肢
     std::array<float, 12> leg_cur{}; // 下肢
@@ -244,26 +270,51 @@ int main(int argc, char const* argv[]) {
     });
 
     // send: 同时发送上肢指令和下肢保持位置
+    // 按电机类型设置分关节增益，提高下肢抗重心偏移能力
     auto send = [&](const std::array<float, 17>& pos) {
         float w = weight.load();
         cmd.motor_cmd().at(kNotUsedJoint).q(w);
 
-        // 上肢关节：跟踪目标位置
+        // 上肢关节：跟踪目标位置（手臂用 GearboxS 增益）
         for (int j = 0; j < 17; j++) {
             cmd.motor_cmd().at(kArmJoints[j]).q(pos[j]);
             cmd.motor_cmd().at(kArmJoints[j]).dq(0);
-            cmd.motor_cmd().at(kArmJoints[j]).kp(kKp);
-            cmd.motor_cmd().at(kArmJoints[j]).kd(kKd);
             cmd.motor_cmd().at(kArmJoints[j]).tau(0);
         }
+        // 手臂关节 (15-28): GearboxS
+        for (int j = 15; j <= 28; j++) {
+            cmd.motor_cmd().at(j).kp(kArmKp);
+            cmd.motor_cmd().at(j).kd(kArmKd);
+        }
+        // 腰Yaw (12): GearboxM
+        cmd.motor_cmd().at(12).kp(kWaistYawKp);
+        cmd.motor_cmd().at(12).kd(kWaistYawKd);
+        // 腰Roll/Pitch (13-14): GearboxS
+        cmd.motor_cmd().at(13).kp(kWaistRollKp);
+        cmd.motor_cmd().at(13).kd(kWaistRollKd);
+        cmd.motor_cmd().at(14).kp(kWaistRollKp);
+        cmd.motor_cmd().at(14).kd(kWaistRollKd);
 
-        // 下肢关节：保持初始位置，防止 weight=1.0 时失去平衡控制
+        // 下肢关节：保持初始位置，按电机类型设置增益
         for (int j = 0; j < 12; j++) {
             cmd.motor_cmd().at(kLegJoints[j]).q(leg_cur[j]);
             cmd.motor_cmd().at(kLegJoints[j]).dq(0);
-            cmd.motor_cmd().at(kLegJoints[j]).kp(kLegKp);
-            cmd.motor_cmd().at(kLegJoints[j]).kd(kLegKd);
             cmd.motor_cmd().at(kLegJoints[j]).tau(0);
+        }
+        // 髋关节 (0-2, 6-8): GearboxM
+        for (int j : {0, 1, 2, 6, 7, 8}) {
+            cmd.motor_cmd().at(j).kp(kHipKp);
+            cmd.motor_cmd().at(j).kd(kHipKd);
+        }
+        // 膝关节 (3, 9): GearboxL
+        cmd.motor_cmd().at(3).kp(kKneeKp);
+        cmd.motor_cmd().at(3).kd(kKneeKd);
+        cmd.motor_cmd().at(9).kp(kKneeKp);
+        cmd.motor_cmd().at(9).kd(kKneeKd);
+        // 踝关节 (4-5, 10-11): GearboxS
+        for (int j : {4, 5, 10, 11}) {
+            cmd.motor_cmd().at(j).kp(kAnkleKp);
+            cmd.motor_cmd().at(j).kd(kAnkleKd);
         }
 
         arm_pub->Write(cmd);

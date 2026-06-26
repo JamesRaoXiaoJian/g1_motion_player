@@ -40,3 +40,11 @@ target_link_libraries(test_connection unitree_sdk2)
 # state_recorder: record robot joint states to CSV
 add_executable(state_recorder src/state_recorder.cpp)
 target_link_libraries(state_recorder unitree_sdk2)
+
+# csv_replay_debug: full-body CSV replay via debug mode (rt/user_lowcmd)
+add_executable(csv_replay_debug src/csv_replay_debug.cpp)
+target_link_libraries(csv_replay_debug unitree_sdk2)
+
+# g1_mode_switch: FSM mode switching utility
+add_executable(g1_mode_switch src/g1_mode_switch.cpp)
+target_link_libraries(g1_mode_switch unitree_sdk2)
