@@ -33,9 +33,11 @@
 |------|------|------|
 | BalanceStand + LowStand | 即时 | 切换平衡站立，降低重心 |
 | Engage | ~1s | weight 从 0→1，逐步接管上肢控制 |
-| Transition | ~2s | 平滑过渡到 CSV 首帧（速度钳位 0.5 rad/s） |
-| Replay | 取决于帧数/fps | 逐帧回放（速度钳位 0.8 rad/s） |
-| Disengage | ~4s | 回到初始姿态，weight 从 1→0 交还控制 |
+| Entry Select | 即时 | 在动作前 2 秒窗口内选择最接近当前姿态的入口帧 |
+| Transition | ~2s | 平滑过渡到入口帧（速度钳位 0.5 rad/s） |
+| Exit Select | 即时 | 在动作后 2 秒窗口内选择最接近初始姿态的退出帧 |
+| Replay | 取决于入口/退出帧和 fps | 从入口帧回放到退出帧（速度钳位 0.8 rad/s） |
+| Disengage | ~4s | 从退出帧回到初始姿态，weight 从 1→0 交还控制 |
 
 ### 关节映射
 

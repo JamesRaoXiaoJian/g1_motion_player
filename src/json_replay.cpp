@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include "replay_planner.hpp"
+
 #include <boost/json.hpp>
 
 #include <unitree/idl/hg/LowCmd_.hpp>
@@ -103,6 +105,7 @@ static constexpr float kAnkleKd = 1.0f;
 // 速度钳位：Transition和Replay阶段都启用，确保稳定
 static constexpr float kTransitionMaxVel = 0.5f;  // rad/s
 static constexpr float kReplayMaxVel = 0.8f;      // rad/s，Replay阶段稍快
+static constexpr float kNearestWindowSeconds = 2.0f;
 
 // weight=1.0，与官方 g1_arm7_sdk_dds_example 一致
 static constexpr float kFinalWeightTarget = 1.0f;
@@ -316,6 +319,28 @@ int main(int argc, char const* argv[]) {
     for (int i = 0; i < 12; i++) std::cout << leg_cur[i] << " ";
     std::cout << std::endl;
 
+    replay_planner::ControlledPose current_pose = cur;
+    std::size_t entry_frame = replay_planner::SelectNearestEntryIndex(
+        current_pose,
+        frames,
+        kArmJoints,
+        fps,
+        kNearestWindowSeconds
+    );
+    std::size_t exit_frame = replay_planner::SelectNearestExitIndex(
+        current_pose,
+        frames,
+        kArmJoints,
+        fps,
+        kNearestWindowSeconds,
+        entry_frame
+    );
+    std::cout << "Entry strategy: nearest_window"
+              << " window=" << kNearestWindowSeconds << "s"
+              << " entry_frame=" << entry_frame
+              << " exit_frame=" << exit_frame
+              << " / " << frames.size() << std::endl;
+
     unitree_hg::msg::dds_::LowCmd_ cmd;
     float dt = 1.0f / fps;
     float transition_max_delta = kTransitionMaxVel / fps;
@@ -434,10 +459,10 @@ int main(int argc, char const* argv[]) {
         std::this_thread::sleep_for(sleep_us);
     }
 
-    // Phase 2: Transition — 速度钳位平滑过渡到 CSV 首帧
+    // Phase 2: Transition — nearest-window entry frame
     std::cout << "Transitioning..." << std::endl;
     std::array<float, 17> target{};
-    for (int i = 0; i < 17; i++) target[i] = frames[0].joints[kArmJoints[i]];
+    for (int i = 0; i < 17; i++) target[i] = frames[entry_frame].joints[kArmJoints[i]];
     std::array<float, 17> cmd_pos = cur;
 
     for (int i = 0; i < (int)(2.0f / dt); i++) {
@@ -455,9 +480,12 @@ int main(int argc, char const* argv[]) {
 
     // Phase 3: Replay
     float replay_max_delta = kReplayMaxVel / fps;
-    std::cout << "Replaying " << frames.size() << " frames (vel clamp=" << kReplayMaxVel << " rad/s)..." << std::endl;
+    std::size_t planned_frames = exit_frame - entry_frame + 1;
+    std::cout << "Replaying " << planned_frames
+              << " frames from " << entry_frame << " to " << exit_frame
+              << " (vel clamp=" << kReplayMaxVel << " rad/s)..." << std::endl;
     auto start = std::chrono::steady_clock::now();
-    for (size_t fi = 0; fi < frames.size(); fi++) {
+    for (size_t fi = entry_frame; fi <= exit_frame; fi++) {
         auto fs = std::chrono::steady_clock::now();
 
         std::array<float, 17> frame_target{};
@@ -476,15 +504,19 @@ int main(int argc, char const* argv[]) {
         }
         send(cmd_pos);
 
-        if (fi % 60 == 0) {
+        std::size_t replay_index = fi - entry_frame;
+        if (replay_index % 60 == 0) {
             float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
-            std::cout << "  " << fi << "/" << frames.size() << " t=" << t << "s" << std::endl;
+            std::cout << "  " << replay_index << "/" << planned_frames
+                      << " source_frame=" << fi
+                      << " t=" << t << "s" << std::endl;
         }
         auto el = std::chrono::steady_clock::now() - fs;
         if (el < sleep_us) std::this_thread::sleep_for(sleep_us - el);
+        if (fi == exit_frame) break;
     }
     float total = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
-    std::cout << "Done: " << frames.size() << " frames in " << total << "s" << std::endl;
+    std::cout << "Done: " << planned_frames << " frames in " << total << "s" << std::endl;
 
     // Phase 4: Disengage
     std::cout << "Disengaging..." << std::endl;

@@ -10,6 +10,7 @@ Unitree G1 人形机器人动作回放工具。项目包含两层：
 - CSV 动作仍由 `csv_replay` 执行。
 - JSON 动作由 API 直接传给 `json_replay --stdin` 执行。
 - API 会同时保留 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`，CSV 用于阅读和调试，不再作为 JSON 回放的执行中转。
+- 动作默认使用 `nearest_window` 入口/退出策略：入口在动作前 2 秒内选择最接近当前机器人姿态的帧，退出在动作后 2 秒内选择最接近初始姿态的帧。
 
 ## 项目结构
 
@@ -400,10 +401,12 @@ Motor_real = weight * User_Cmd + (1 - weight) * BuiltIn_Cmd
 
 1. 连接 DDS，读取所有关节当前位置。
 2. `weight` 从 `0` 增加到 `1.0`，逐步接管上肢控制，同时下肢保持初始位置。
-3. 平滑过渡到首帧，Transition 阶段速度钳位 `0.5 rad/s`。
-4. 按帧回放，Replay 阶段速度钳位 `0.8 rad/s`。
-5. 平滑回到初始姿态。
-6. `weight` 从 `1.0` 降到 `0`，交还内置控制。
+3. 在动作前 2 秒窗口内选择最接近当前姿态的入口帧。
+4. 平滑过渡到该入口帧，Transition 阶段速度钳位 `0.5 rad/s`。
+5. 在动作后 2 秒窗口内选择最接近初始姿态的退出帧。
+6. 从入口帧回放到退出帧，Replay 阶段速度钳位 `0.8 rad/s`。
+7. 从退出帧平滑回到初始姿态。
+8. `weight` 从 `1.0` 降到 `0`，交还内置控制。
 
 关键控制参数：
 
@@ -411,6 +414,7 @@ Motor_real = weight * User_Cmd + (1 - weight) * BuiltIn_Cmd
 |------|----|------|
 | `kTransitionMaxVel` | `0.5 rad/s` | 过渡阶段速度钳位 |
 | `kReplayMaxVel` | `0.8 rad/s` | 回放阶段速度钳位 |
+| `kNearestWindowSeconds` | `2.0s` | 入口/退出 nearest window 搜索窗口 |
 | `kFinalWeightTarget` | `1.0` | 完全接管控制 |
 
 稳定性措施：
