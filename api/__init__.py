@@ -1,1 +1,3 @@
-"""Local HTTP API package for G1 motion player."""
+from .main import create_app
+
+__all__ = ["create_app"]
