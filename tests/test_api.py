@@ -46,7 +46,7 @@ def test_validate_accepts_motion_request():
     assert body["ok"] is True
     assert body["error"] is None
     assert body["data"]["motion"] == "wave"
-    assert body["data"]["csv_path"] == "assets/wave.csv"
+    assert body["data"]["csv_path"] == "assets/csv/wave.csv"
     assert body["data"]["fps"] == 60
     assert body["data"]["net"] == "eno0"
     assert body["data"]["dry_run"] is True
@@ -94,6 +94,42 @@ def test_validate_rejects_multiple_sources():
     assert response.status_code == 400
     body = response.json()
     assert body["error"]["code"] == "invalid_request"
+
+
+def test_replay_with_motion_json_uses_json_replay_and_emits_debug_paths(monkeypatch):
+    async def fake_json_replay(
+        repo_root: Path,
+        json_payload: str,
+        fps: float,
+        net: str,
+    ) -> dict[str, int | str]:
+        assert repo_root == REPO_ROOT
+        assert "poseData" in json_payload
+        assert fps == 60
+        assert net == "eno0"
+        return {"returncode": 0, "stdout": "ok", "stderr": ""}
+
+    monkeypatch.setattr("api.main._run_json_replay", fake_json_replay)
+
+    response = make_client().post(
+        "/api/replay",
+        json={
+            "motion_json": [
+                {"time": 0, "poseData": [float(i) for i in range(36)]},
+                {"time": 1, "poseData": [float(i + 1) for i in range(36)]},
+            ],
+            "dry_run": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["source_type"] == "motion_json"
+    assert body["data"]["replay"]["stdout"] == "ok"
+    assert "debug_json_path" in body["data"]
+    assert body["data"]["debug_json_path"].endswith(".json")
+    assert body["data"]["debug_csv_path"].endswith(".csv")
 
 
 def test_validate_rejects_motion_json_inconsistent_joint_values():

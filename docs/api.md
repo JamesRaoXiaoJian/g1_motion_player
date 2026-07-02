@@ -12,18 +12,19 @@
                                   │
                                   │ spawn subprocess
                                   ▼
-                           ┌──────────────┐
-                           │  csv_replay   │
-                           │  (C++ binary) │
-                           └──────────────┘
+                           ┌────────────────────┐
+                           │ csv_replay         │
+                           │ json_replay        │
+                           │  (C++ binary)      │
+                           └────────────────────┘
 ```
 
 ### 执行流程
 
 1. **客户端** 发送 HTTP 请求到 FastAPI 服务
 2. **FastAPI** 解析请求，加载 CSV 或 JSON 动作数据，校验合法性
-3. **FastAPI** 调用编译好的 `csv_replay` C++ 二进制（子进程）
-4. **csv_replay** 通过宇树 SDK 的 DDS 通信（`rt/arm_sdk` 话题）下发关节角度给机器人
+3. **FastAPI** 调用编译好的 `csv_replay` 或 `json_replay` C++ 二进制（子进程）
+4. **csv_replay/json_replay** 通过宇树 SDK 的 DDS 通信（`rt/arm_sdk` 话题）下发关节角度给机器人
 5. 机器人执行动作，完成后子进程退出，API 返回结果
 
 ### 动作执行的五个阶段
@@ -124,7 +125,7 @@ nohup python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
     "motions": [
       {
         "name": "wave",
-        "csv_path": "assets/wave.csv",
+        "csv_path": "assets/csv/wave.csv",
         "frames": 600,
         "duration_seconds": 10.0,
         "columns": 36,
@@ -227,7 +228,7 @@ GET /api/motions/wave/json?fps=30
   "ok": true,
   "data": {
     "motion": "wave",
-    "csv_path": "assets/wave.csv",
+    "csv_path": "assets/csv/wave.csv",
     "fps": 60.0,
     "net": "eno0",
     "dry_run": true,
@@ -262,8 +263,8 @@ GET /api/motions/wave/json?fps=30
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `motion` | string \| null | 三选一 | null | 动作名（如 `wave`），对应 `assets/{name}.csv` |
-| `csv_path` | string \| null | 三选一 | null | CSV 文件相对路径（如 `assets/wave.csv`） |
+| `motion` | string \| null | 三选一 | null | 动作名（如 `wave`），对应 `assets/csv/{name}.csv` |
+| `csv_path` | string \| null | 三选一 | null | CSV 文件相对路径（如 `assets/csv/wave.csv`） |
 | `motion_json` | array \| null | 三选一 | null | JSON 帧数据数组（见下方格式） |
 | `fps` | float | 否 | 60.0 | 回放帧率，范围 (0, 240] |
 | `net` | string | 否 | "eno0" | DDS 网卡名 |
@@ -299,7 +300,7 @@ GET /api/motions/wave/json?fps=30
   "ok": true,
   "data": {
     "motion": "wave",
-    "csv_path": "assets/wave.csv",
+    "csv_path": "assets/csv/wave.csv",
     "fps": 60.0,
     "net": "eno0",
     "dry_run": false,
@@ -323,8 +324,15 @@ GET /api/motions/wave/json?fps=30
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `returncode` | int | 进程退出码，0=成功 |
-| `stdout` | string | csv_replay 的标准输出（含完整执行日志） |
+| `stdout` | string | csv_replay 或 json_replay 的标准输出（含完整执行日志） |
 | `stderr` | string | 标准错误输出 |
+
+当 `source_type` 为 `motion_json` 时，响应还会带上：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `debug_json_path` | string | 写入的 JSON 调试文件（如 `assets/json/<name>.json`） |
+| `debug_csv_path` | string | 写入的 CSV 调试文件（如 `assets/csv/<name>.csv`） |
 
 ---
 
@@ -337,7 +345,7 @@ GET /api/motions/wave/json?fps=30
 | `csv_not_found` | 404 | CSV 文件不存在 |
 | `invalid_csv` | 400 | CSV 格式错误（列数、数值等） |
 | `invalid_json` | 400 | JSON 帧数据格式错误 |
-| `replay_error` | 500 | csv_replay 执行失败（二进制不存在或返回非零） |
+| `replay_error` | 500 | csv_replay/json_replay 执行失败（二进制不存在或返回非零） |
 
 ---
 
@@ -368,8 +376,13 @@ curl -X POST http://localhost:8000/api/replay \
   -H "Content-Type: application/json" \
   -d '{"motion": "zuoyi", "fps": 50, "net": "eno0", "dry_run": false}'
 
+# 通过 motion_json 执行
+curl -X POST http://localhost:8000/api/replay \
+  -H "Content-Type: application/json" \
+  -d '{"motion_json": [{"poseData": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "jointValues": {"waist_pitch_joint": 0.0}}], "dry_run": false}'
+
 # 通过 csv_path 指定文件
 curl -X POST http://localhost:8000/api/replay \
   -H "Content-Type: application/json" \
-  -d '{"csv_path": "assets/wave.csv", "dry_run": false}'
+  -d '{"csv_path": "assets/csv/wave.csv", "dry_run": false}'
 ```

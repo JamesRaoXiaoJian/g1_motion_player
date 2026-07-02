@@ -11,6 +11,9 @@ from typing import Any
 EXPECTED_COLUMNS = 36
 DEFAULT_METADATA_FPS = 60.0
 POSE_JOINT_DEGREES_SCALE = 180.0 / math.pi
+ASSETS_DIR = Path("assets")
+CSV_ASSETS_DIR = ASSETS_DIR / "csv"
+JSON_ASSETS_DIR = ASSETS_DIR / "json"
 CSV_HEADER = (
     "root_pos_x",
     "root_pos_y",
@@ -339,7 +342,7 @@ def load_motion_csv_as_json(path: Path, fps: float = DEFAULT_METADATA_FPS) -> li
 
 
 def discover_motions(repo_root: Path) -> list[MotionMetadata]:
-    assets_dir = repo_root / "assets"
+    assets_dir = (repo_root / CSV_ASSETS_DIR).resolve()
     motions: list[MotionMetadata] = []
     for csv_path in sorted(assets_dir.glob("*.csv")):
         try:
@@ -378,7 +381,7 @@ def resolve_csv_path(repo_root: Path, motion: str | None, csv_path: str | None) 
                 "invalid_request",
                 "motion must be a motion name, not a path.",
             )
-        assets_dir = (repo_root / "assets").resolve()
+        assets_dir = (repo_root / CSV_ASSETS_DIR).resolve()
         resolved = (assets_dir / f"{motion_name}.csv").resolve()
         if not _is_inside_repo(resolved, assets_dir):
             raise CsvMotionError(

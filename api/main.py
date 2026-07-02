@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
-import tempfile
 from pathlib import Path
+from uuid import uuid4
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -18,8 +18,13 @@ from .csv_motion import (
     load_motion_csv,
     load_motion_csv_as_json,
     load_motion_json,
+    CSV_ASSETS_DIR,
+    JSON_ASSETS_DIR,
     resolve_csv_path,
 )
+
+CSV_DIR = CSV_ASSETS_DIR
+JSON_DIR = JSON_ASSETS_DIR
 
 
 class ApiError(Exception):
@@ -101,19 +106,88 @@ async def _run_csv_replay(
     }
 
 
-def _json_to_temp_csv(frames: list[MotionFramePayload], repo_root: Path) -> Path:
-    tmp = tempfile.NamedTemporaryFile(
-        dir=str(repo_root / "assets"),
-        suffix=".csv",
-        delete=False,
-        mode="w",
-        newline="",
+async def _run_json_replay(
+    repo_root: Path,
+    json_payload: str,
+    fps: float,
+    net: str,
+) -> dict[str, Any]:
+    binary = repo_root / "build" / "json_replay"
+    if not binary.exists():
+        raise ApiError(
+            "replay_error",
+            f"json_replay binary not found at {binary}. Build the project first.",
+            500,
+        )
+
+    cmd = [str(binary), "--stdin", str(int(fps)), net]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(repo_root),
     )
-    writer = csv.writer(tmp)
-    for frame in frames:
-        writer.writerow([f"{v:.10g}" for v in frame.poseData])
-    tmp.close()
-    return Path(tmp.name)
+    stdout, stderr = await proc.communicate(input=json_payload.encode(errors="utf-8"))
+    return {
+        "returncode": proc.returncode,
+        "stdout": stdout.decode(errors="replace").strip(),
+        "stderr": stderr.decode(errors="replace").strip(),
+    }
+
+
+def _sanitize_artifact_stem(name: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in name.strip())
+    return safe or "payload"
+
+
+def _payload_paths(repo_root: Path, stem: str) -> tuple[Path, Path]:
+    stem = _sanitize_artifact_stem(stem)
+    return (
+        repo_root / JSON_DIR / f"{stem}.json",
+        repo_root / CSV_DIR / f"{stem}.csv",
+    )
+
+
+def _serialize_motion_json(frames: list[MotionFramePayload]) -> str:
+    return json.dumps([frame.model_dump() for frame in frames], ensure_ascii=False)
+
+
+def _write_payload_artifacts(
+    json_path: Path,
+    csv_path: Path,
+    frames: list[MotionFramePayload],
+) -> tuple[Path, Path]:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+
+    json_path.write_text(
+        _serialize_motion_json(frames),
+        encoding="utf-8",
+    )
+
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        for frame in frames:
+            writer.writerow([f"{value:.10g}" for value in frame.poseData])
+    return json_path, csv_path
+
+
+async def _schedule_payload_artifacts(
+    repo_root: Path,
+    stem: str,
+    frames: list[MotionFramePayload],
+) -> tuple[Path, Path]:
+    json_path, csv_path = _payload_paths(repo_root, stem)
+    await asyncio.to_thread(_write_payload_artifacts, json_path, csv_path, frames)
+    return json_path, csv_path
+
+
+def _silence_task_errors(task: asyncio.Task[Any]) -> None:
+    try:
+        task.result()
+    except Exception:
+        pass
 
 
 def _validate_replay_request(
@@ -152,7 +226,7 @@ def _validate_replay_request(
         )
         return {
             "motion": request_data.motion or "payload",
-            "csv_path": request_data.motion or "payload",
+            "csv_path": None,
             "fps": request_data.fps,
             "net": request_data.net,
             "dry_run": request_data.dry_run,
@@ -230,32 +304,49 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             return success(_validate_replay_request(root, request_data))
 
         validated = _validate_replay_request(root, request_data)
-        tmp_csv: Path | None = None
+        if validated["source_type"] == "motion_json":
+            motion_frames = request_data.motion_json
+            if motion_frames is None:
+                raise ApiError("invalid_request", "motion_json is required.", 400)
 
-        try:
-            if validated["source_type"] == "motion_json":
-                tmp_csv = _json_to_temp_csv(request_data.motion_json, root)  # type: ignore[arg-type]
-                csv_file = str(tmp_csv.relative_to(root))
-            else:
-                csv_file = validated["csv_path"]
-
-            result = await _run_csv_replay(
+            payload = _serialize_motion_json(motion_frames)
+            artifact_stem = request_data.motion or f"payload_{uuid4().hex[:8]}"
+            json_path, csv_path = _payload_paths(root, artifact_stem)
+            background_task = asyncio.create_task(
+                _schedule_payload_artifacts(root, artifact_stem, motion_frames)
+            )
+            background_task.add_done_callback(_silence_task_errors)
+            result = await _run_json_replay(
                 repo_root=root,
-                csv_path=csv_file,
+                json_payload=payload,
                 fps=validated["fps"],
                 net=validated["net"],
             )
             validated["replay"] = result
+            validated["debug_json_path"] = str(json_path.relative_to(root))
+            validated["debug_csv_path"] = str(csv_path.relative_to(root))
             if result["returncode"] != 0:
                 raise ApiError(
                     "replay_error",
-                    f"csv_replay exited with code {result['returncode']}: {result['stderr']}",
+                    f"json_replay exited with code {result['returncode']}: {result['stderr']}",
                     500,
                 )
             return success(validated)
-        finally:
-            if tmp_csv is not None:
-                tmp_csv.unlink(missing_ok=True)
+
+        result = await _run_csv_replay(
+            repo_root=root,
+            csv_path=validated["csv_path"],
+            fps=validated["fps"],
+            net=validated["net"],
+        )
+        validated["replay"] = result
+        if result["returncode"] != 0:
+            raise ApiError(
+                "replay_error",
+                f"csv_replay exited with code {result['returncode']}: {result['stderr']}",
+                500,
+            )
+        return success(validated)
 
     return app
 

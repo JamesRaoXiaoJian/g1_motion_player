@@ -9,13 +9,18 @@ g1_motion_player/
 ├── CMakeLists.txt
 ├── src/
 │   ├── csv_replay.cpp          # 主程序：CSV 关键帧回放（Arm SDK 模式）
+│   ├── json_replay.cpp         # JSON 关键帧回放（Arm SDK 模式）
 │   ├── csv_replay_debug.cpp    # 调试模式：rt/user_lowcmd 直接控制（需 PASSIVE）
 │   ├── g1_mode_switch.cpp      # FSM 状态切换工具
 │   ├── state_recorder.cpp      # 状态录制工具：全流程录制
 │   └── test_connection.cpp     # 连接测试
 ├── assets/
-│   ├── zuoyi.csv               # 作揖动作（600帧，10秒）
-│   └── wave.csv                # 打招呼动作（600帧，10秒）
+│   ├── csv/
+│   │   ├── zuoyi.csv           # 作揖动作（600帧，10秒）
+│   │   └── wave.csv            # 打招呼动作（600帧，10秒）
+│   └── json/
+│       ├── zuoyi.json          # 作揖动作 JSON 调试数据
+│       └── wave.json           # 打招呼动作 JSON 调试数据
 ├── docs/
 │   └── initial_pose_analysis.md # 初值分析报告
 ├── thirdparty/
@@ -60,7 +65,7 @@ cmake ..
 make
 ```
 
-产物：`build/csv_replay`、`build/state_recorder`、`build/test_connection`
+产物：`build/csv_replay`、`build/json_replay`、`build/state_recorder`、`build/test_connection`
 
 ## 使用
 
@@ -90,16 +95,16 @@ ip -br a
 
 ```bash
 # 默认网卡 eno0，60fps
-./build/csv_replay assets/zuoyi.csv
+./build/csv_replay assets/csv/zuoyi.csv
 
 # 指定帧率
-./build/csv_replay assets/zuoyi.csv 50
+./build/csv_replay assets/csv/zuoyi.csv 50
 
 # 指定网卡
-./build/csv_replay assets/wave.csv 60 eth0
+./build/csv_replay assets/csv/wave.csv 60 eth0
 
 # 兼容旧参数顺序
-./build/csv_replay eno0 assets/zuoyi.csv
+./build/csv_replay eno0 assets/csv/zuoyi.csv
 ```
 
 ### 录制全流程状态
@@ -107,10 +112,10 @@ ip -br a
 录制机器人从站立到动作执行再到恢复的全过程关节状态：
 
 ```bash
-./build/state_recorder assets/zuoyi.csv 60 eno0
+./build/state_recorder assets/csv/zuoyi.csv 60 eno0
 ```
 
-输出文件自动命名为 `assets/zuoyi_recorded.csv`，格式与输入 CSV 一致（36列 LAFAN1 格式，带表头）。
+输出文件自动命名为 `assets/csv/zuoyi_recorded.csv`，格式与输入 CSV 一致（36列 LAFAN1 格式，带表头）。
 
 录制流程：2s 静止 → Engage → Transition → Replay → Disengage → 2s 静止
 
@@ -128,7 +133,7 @@ ip -br a
 通过 `rt/user_lowcmd` 直接控制全身 29 DOF，需遥控器 L2+A 先进入 PASSIVE：
 
 ```bash
-./build/csv_replay_debug assets/zuoyi.csv
+./build/csv_replay_debug assets/csv/zuoyi.csv
 ```
 
 **注意**：当前固件版本调试模式不可用（`SwitchToUserCtrl` API 未实现）。
@@ -240,7 +245,7 @@ LAFAN1 retargeting 格式，每行 36 列（支持有表头/无表头）：
 
 ```json
 {
-  "csv_path": "assets/wave.csv",
+  "csv_path": "assets/csv/wave.csv",
   "fps": 60,
   "net": "eno0",
   "dry_run": true
@@ -274,15 +279,18 @@ LAFAN1 retargeting 格式，每行 36 列（支持有表头/无表头）：
 返回该 CSV 的 `[{id,time,poseData,jointValues}]` 调试 payload，用于前端发送/日志对比。
 
 测试资源（本地联调直接可用）：
-- `assets/wave_debug.json`
-- `assets/zuoyi_debug.json`
+- `assets/json/wave.json`
+- `assets/json/zuoyi.json`
+
+JSON 数据用于 `/api/replay` 的 `motion_json` 入参。接口会把该 payload 转发给
+`json_replay` 执行，并在本地异步保留一份 `assets/json/<name>.json` 与 `assets/csv/<name>.csv` 便于调试追踪。
 
 ## 常见问题
 
 ### libddsc.so.0 not found
 
 ```bash
-./build/csv_replay: error while loading shared libraries: libddsc.so.0
+./build/csv_replay 或 ./build/json_replay: error while loading shared libraries: libddsc.so.0
 ```
 
 原因：SDK 目录里有 `libddsc.so` 但运行时需要 `libddsc.so.0`。
