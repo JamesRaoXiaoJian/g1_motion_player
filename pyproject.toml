@@ -1,0 +1,19 @@
+[project]
+name = "g1-motion-player-api"
+version = "0.1.0"
+description = "Local HTTP API for G1 motion replay tools"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1"
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27,<1",
+  "pytest>=8,<9"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
