@@ -1,81 +1,132 @@
 # G1 Motion Player
 
-Unitree G1 人形机器人上肢关键帧回放工具。通过 SDK `rt/arm_sdk` 话题下发关节角度，驱动机器人执行预录动作。
+Unitree G1 人形机器人动作回放工具。项目包含两层：
+
+- C++ 回放层：`csv_replay`、`json_replay` 等二进制程序，通过 Unitree SDK DDS 话题 `rt/arm_sdk` 控制机器人。
+- FastAPI 接口层：提供动作查询、创建、更新、校验和回放接口，方便前端或其他服务本地联调。
+
+当前执行策略：
+
+- CSV 动作仍由 `csv_replay` 执行。
+- JSON 动作由 API 直接传给 `json_replay --stdin` 执行。
+- API 会同时保留 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`，CSV 用于阅读和调试，不再作为 JSON 回放的执行中转。
 
 ## 项目结构
 
-```
+```text
 g1_motion_player/
 ├── CMakeLists.txt
+├── pyproject.toml
+├── api/
+│   ├── main.py                # FastAPI 入口
+│   └── csv_motion.py          # CSV/JSON 动作解析与校验
 ├── src/
-│   ├── csv_replay.cpp          # 主程序：CSV 关键帧回放（Arm SDK 模式）
-│   ├── json_replay.cpp         # JSON 关键帧回放（Arm SDK 模式）
-│   ├── csv_replay_debug.cpp    # 调试模式：rt/user_lowcmd 直接控制（需 PASSIVE）
-│   ├── g1_mode_switch.cpp      # FSM 状态切换工具
-│   ├── state_recorder.cpp      # 状态录制工具：全流程录制
-│   └── test_connection.cpp     # 连接测试
+│   ├── csv_replay.cpp         # CSV 关键帧回放
+│   ├── json_replay.cpp        # JSON 关键帧回放，支持 --stdin
+│   ├── csv_replay_debug.cpp   # rt/user_lowcmd 调试模式
+│   ├── g1_mode_switch.cpp     # FSM 状态切换工具
+│   ├── state_recorder.cpp     # 状态录制工具
+│   └── test_connection.cpp    # DDS 连接测试
 ├── assets/
 │   ├── csv/
-│   │   ├── zuoyi.csv           # 作揖动作（600帧，10秒）
-│   │   └── wave.csv            # 打招呼动作（600帧，10秒）
+│   │   ├── wave.csv
+│   │   └── zuoyi.csv
 │   └── json/
-│       ├── zuoyi.json          # 作揖动作 JSON 调试数据
-│       └── wave.json           # 打招呼动作 JSON 调试数据
+│       ├── wave.json
+│       └── zuoyi.json
 ├── docs/
-│   └── initial_pose_analysis.md # 初值分析报告
-├── thirdparty/
-│   └── unitree_sdk2/           # 宇树 SDK（git submodule）
-└── README.md
+│   ├── api.md
+│   └── initial_pose_analysis.md
+└── thirdparty/
+    └── unitree_sdk2/          # git submodule
 ```
 
-## 环境配置
+## 环境要求
 
-### 系统要求
+推荐环境：
 
-- Ubuntu 20.04 / 22.04 (x86_64 或 aarch64)
-- GCC 9.4+，CMake 3.5+
+- Ubuntu 20.04 / 22.04
+- x86_64 或 aarch64
+- GCC 9.4+
+- CMake 3.5+
+- Python 3.9+
+- Unitree G1 与电脑在同一有线网段
 
-### 安装依赖
+安装系统依赖：
 
 ```bash
-sudo apt-get update && sudo apt-get install -y \
-  cmake g++ build-essential \
+sudo apt-get update
+sudo apt-get install -y \
+  git cmake g++ build-essential pkg-config \
   libyaml-cpp-dev libeigen3-dev \
-  libboost-all-dev libspdlog-dev libfmt-dev
+  libboost-all-dev libspdlog-dev libfmt-dev \
+  python3 python3-venv python3-pip
 ```
 
-### 克隆项目
+## 获取代码与子模块
+
+首次克隆：
 
 ```bash
-git clone --recurse-submodules https://github.com/你/g1_motion_player.git
+git clone --recurse-submodules https://github.com/JamesRaoXiaoJian/g1_motion_player.git
 cd g1_motion_player
 ```
 
-如果已克隆但子模块为空：
+如果已经克隆过，或发现 `thirdparty/unitree_sdk2` 目录为空：
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### 编译
+确认子模块完整：
 
 ```bash
-mkdir -p build && cd build
-cmake ..
-make
+test -f thirdparty/unitree_sdk2/CMakeLists.txt && echo "unitree_sdk2 ok"
 ```
 
-产物：`build/csv_replay`、`build/json_replay`、`build/state_recorder`、`build/test_connection`
+如果这里没有输出，C++ 编译会在 `add_subdirectory(thirdparty/unitree_sdk2)` 失败。
 
-## 使用
+## Python API 环境
 
-### 网络配置
+推荐用虚拟环境安装 API 依赖：
 
 ```bash
-# 网线连接机器人，设置同网段 IP
-sudo ip addr add 192.168.123.100/24 dev eno0
-ping 192.168.123.164  # 测试连通
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
+
+`pyproject.toml` 中的依赖：
+
+- 运行依赖：`fastapi`、`uvicorn[standard]`
+- 测试依赖：`httpx`、`pytest`
+
+如果你使用 `uv`，也可以执行：
+
+```bash
+uv sync --extra dev
+```
+
+## 编译 C++ 回放工具
+
+```bash
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+```
+
+编译产物：
+
+- `build/csv_replay`
+- `build/json_replay`
+- `build/test_connection`
+- `build/state_recorder`
+- `build/csv_replay_debug`
+- `build/g1_mode_switch`
+
+`CMakeLists.txt` 会在 `build/` 目录创建 DDS 运行时需要的 `.so.0` 软链接，避免污染 `thirdparty/unitree_sdk2` 子模块。
+
+## 网络配置
 
 查看网卡名：
 
@@ -83,113 +134,218 @@ ping 192.168.123.164  # 测试连通
 ip -br a
 ```
 
-### 连接测试
+如果机器人默认地址为 `192.168.123.164`，电脑网卡可以配置同网段地址：
 
 ```bash
-./build/test_connection
-# 或指定网卡
+sudo ip addr add 192.168.123.100/24 dev eno0
+ping 192.168.123.164
+```
+
+把 `eno0` 替换成你的实际有线网卡名。API 和 C++ 工具默认网卡都是 `eno0`。
+
+## C++ 工具使用
+
+连接测试：
+
+```bash
 ./build/test_connection eno0
 ```
 
-### 执行动作
+CSV 回放：
 
 ```bash
-# 默认网卡 eno0，60fps
-./build/csv_replay assets/csv/zuoyi.csv
-
-# 指定帧率
-./build/csv_replay assets/csv/zuoyi.csv 50
-
-# 指定网卡
-./build/csv_replay assets/csv/wave.csv 60 eth0
-
-# 兼容旧参数顺序
-./build/csv_replay eno0 assets/csv/zuoyi.csv
+./build/csv_replay assets/csv/wave.csv
+./build/csv_replay assets/csv/wave.csv 60 eno0
 ```
 
-### 录制全流程状态
+JSON 回放：
 
-录制机器人从站立到动作执行再到恢复的全过程关节状态：
+```bash
+./build/json_replay assets/json/wave.json 60 eno0
+```
+
+从 stdin 输入 JSON：
+
+```bash
+./build/json_replay --stdin 60 eno0 < assets/json/wave.json
+```
+
+状态录制：
 
 ```bash
 ./build/state_recorder assets/csv/zuoyi.csv 60 eno0
 ```
 
-输出文件自动命名为 `assets/csv/zuoyi_recorded.csv`，格式与输入 CSV 一致（36列 LAFAN1 格式，带表头）。
-
-录制流程：2s 静止 → Engage → Transition → Replay → Disengage → 2s 静止
-
-### FSM 状态切换
+FSM 状态切换：
 
 ```bash
-./build/g1_mode_switch walk       # 切到走跑模式
-./build/g1_mode_switch passive    # 切到 PASSIVE
-./build/g1_mode_switch standup    # 站立
-./build/g1_mode_switch status     # 查看当前 FSM
+./build/g1_mode_switch walk eno0
+./build/g1_mode_switch passive eno0
+./build/g1_mode_switch standup eno0
+./build/g1_mode_switch status eno0
 ```
 
-### 调试模式（实验性）
-
-通过 `rt/user_lowcmd` 直接控制全身 29 DOF，需遥控器 L2+A 先进入 PASSIVE：
+调试模式：
 
 ```bash
 ./build/csv_replay_debug assets/csv/zuoyi.csv
 ```
 
-**注意**：当前固件版本调试模式不可用（`SwitchToUserCtrl` API 未实现）。
+`csv_replay_debug` 通过 `rt/user_lowcmd` 直接控制全身 29 DOF，通常需要先进入 PASSIVE。当前固件环境下该模式可能不可用，生产回放优先使用 `csv_replay` / `json_replay`。
 
-## 控制原理
+## 启动 API 服务
 
-采用 SDK 的 `rt/arm_sdk` 话题 + weight 机制，与官方 `g1_arm7_sdk_dds_example` 一致。
+前台启动：
 
-```
-Motor_real = weight × User_Cmd + (1 - weight) × BuiltIn_Cmd
-```
-
-执行流程：
-
-```
-① 连接 DDS，读取所有关节当前位置
-② weight 0→1.0（1秒，接管上肢控制，下肢保持初始位置）
-③ 平滑过渡到 CSV 首帧（2秒，速度钳位 0.5 rad/s）
-④ 逐帧回放关键帧（默认 60Hz，速度钳位 0.8 rad/s）
-⑤ 平滑回到初始姿态（2秒）
-⑥ weight 1.0→0（2秒，交还内置控制）
+```bash
+source .venv/bin/activate
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-不需要机器人处于 PASSIVE 模式，站着就能用。
+局域网访问：
 
-### 关键参数
-
-**PD 增益（按电机类型设置）：**
-
-| 关节组 | 电机类型 | Kp | Kd | 说明 |
-|--------|---------|-----|-----|------|
-| 手臂 (15-28) | GearboxS | 60 | 1.5 | 跟踪 CSV 目标 |
-| 腰Yaw (12) | GearboxM | 80 | 2 | 中等硬度，抵抗运控补偿 |
-| 腰Roll/Pitch (13-14) | GearboxS | 50 | 1.5 | 中等硬度 |
-| 髋关节 (0-2, 6-8) | GearboxM | 60 | 1 | 抵抗重心偏移 |
-| 膝关节 (3, 9) | GearboxL | 100 | 2 | 强力支撑 |
-| 踝关节 (4-5, 10-11) | GearboxS | 40 | 1 | 稳定支撑 |
-
-**速度与重量参数：**
-
-| 参数 | 值 | 说明 |
-|------|----|------|
-| `kTransitionMaxVel` | 0.5 rad/s | Transition 阶段速度钳位 |
-| `kReplayMaxVel` | 0.8 rad/s | Replay 阶段速度钳位 |
-| `kFinalWeightTarget` | 1.0 | 完全接管控制 |
-
-**稳定性措施：**
-- `BalanceStand()` — 回放前切换到平衡站立模式，抑制自动迈步
-- `LowStand()` — 降低重心，增大稳定裕度
-- 分关节 PD 增益 — 按电机类型设置，下肢高增益抵抗重心偏移
-
-## CSV 格式
-
-已新增表头，前 7 列是根坐标与姿态，后 29 列是关节角度（弧度），对应关节名如下：
-
+```bash
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+后台运行：
+
+```bash
+nohup python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
+```
+
+## API 认证
+
+默认不启用认证，方便本地联调。
+
+如果设置环境变量 `MOTION_API_KEY`，以下写操作会要求鉴权：
+
+- `POST /api/replay`
+- `POST /api/replay/validate`
+- `POST /api/motions`
+- `PUT /api/motions/{motion}`
+
+启动前设置：
+
+```bash
+export MOTION_API_KEY="replace-with-a-long-random-token"
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+请求时二选一：
+
+```bash
+curl -H "X-API-Key: replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
+curl -H "Authorization: Bearer replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
+```
+
+读取类接口目前不强制鉴权：`GET /health`、`GET /api/motions`、`GET /api/motions/{motion}`、`GET /api/motions/{motion}/json`。
+
+## API 快速示例
+
+列出动作：
+
+```bash
+curl http://127.0.0.1:8000/api/motions
+```
+
+查看单个动作元数据：
+
+```bash
+curl http://127.0.0.1:8000/api/motions/wave
+```
+
+导出动作 JSON：
+
+```bash
+curl "http://127.0.0.1:8000/api/motions/wave/json?fps=60"
+```
+
+创建动作：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/motions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-a-long-random-token" \
+  -d '{
+    "name": "demo",
+    "fps": 60,
+    "motion_json": [
+      {"time": 0, "poseData": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+    ]
+  }'
+```
+
+更新动作：
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/motions/demo \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-a-long-random-token" \
+  -d '{
+    "fps": 60,
+    "motion_json": [
+      {"time": 0, "poseData": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+    ]
+  }'
+```
+
+校验回放请求：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/replay/validate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-a-long-random-token" \
+  -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": true}'
+```
+
+真实回放 CSV 动作：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/replay \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-a-long-random-token" \
+  -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": false}'
+```
+
+真实回放 JSON payload：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/replay \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-a-long-random-token" \
+  -d '{
+    "motion_json": [
+      {"time": 0, "poseData": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+    ],
+    "fps": 60,
+    "net": "eno0",
+    "dry_run": false
+  }'
+```
+
+完整接口文档见 [docs/api.md](docs/api.md)。
+
+## 数据格式
+
+### 资产目录
+
+- `assets/csv/<name>.csv`：CSV 动作文件，供 `csv_replay` 和动作查询使用。
+- `assets/json/<name>.json`：JSON 动作文件，供 `json_replay`、API 创建/更新和调试使用。
+
+动作名必须是简单文件名，不允许路径分隔符，例如 `wave`、`zuoyi`、`demo_01`。
+
+### CSV 格式
+
+每帧 36 列，支持有表头或无表头：
+
+```text
 root_pos_x,root_pos_y,root_pos_z,root_quat_x,root_quat_y,root_quat_z,root_quat_w,
 left_hip_pitch_joint,left_hip_roll_joint,left_hip_yaw_joint,left_knee_joint,left_ankle_joint,left_ankle_roll_joint,
 right_hip_pitch_joint,right_hip_roll_joint,right_hip_yaw_joint,right_knee_joint,right_ankle_joint,right_ankle_roll_joint,
@@ -200,171 +356,212 @@ right_shoulder_pitch_joint,right_shoulder_roll_joint,right_shoulder_yaw_joint,ri
 right_wrist_roll_joint,right_wrist_pitch_joint,right_wrist_yaw_joint
 ```
 
-LAFAN1 retargeting 格式，每行 36 列（支持有表头/无表头）：
+列含义：
 
-```
-列 0-2:   根节点位置 XYZ（忽略）
-列 3-6:   根节点四元数（忽略）
-列 7-35:  29 个关节角度（弧度）
-```
+- `0-2`：根节点位置，当前回放忽略。
+- `3-6`：根节点四元数，当前回放忽略。
+- `7-18`：下肢 12 个关节，回放时保持初始姿态。
+- `19-21`：腰部 3 个关节，对应 SDK 12-14。
+- `22-28`：左臂 7 个关节，对应 SDK 15-21。
+- `29-35`：右臂 7 个关节，对应 SDK 22-28。
 
-上肢关节（列 19-35 = SDK 关节 12-28）：
+### JSON 格式
 
-| 列 | SDK Index | 关节 |
-|----|-----------|------|
-| 19 | 12 | WaistYaw |
-| 20 | 13 | WaistRoll |
-| 21 | 14 | WaistPitch |
-| 22-28 | 15-21 | LeftArm (7 DOF) |
-| 29-35 | 22-28 | RightArm (7 DOF) |
-
-## 参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `net` | 网卡名 | eno0 |
-| `motion` / `csv_path` | 动作名（assets 下）或 CSV 路径 | 选填二选一，与 `motion_json` 互斥 |
-| `motion_json` | JSON 形式轨迹 payload | 选填，与 `motion`/`csv_path` 互斥 |
-| `fps` | 控制帧率 | 60 |
-
-### 本地 API 请求格式（新增）
-
-- `POST /api/replay/validate`
-
-请求字段采用 JSON，且必须且只能给出一种来源：`motion`、`csv_path` 或 `motion_json`。  
-以下是三种合法样例之一（与 `motion_json` 不可混用）：
+API 和 `json_replay` 使用帧数组：
 
 ```json
-{
-  "motion": "wave",
-  "fps": 60,
-  "net": "eno0",
-  "dry_run": true
-}
-```
-
-```json
-{
-  "csv_path": "assets/csv/wave.csv",
-  "fps": 60,
-  "net": "eno0",
-  "dry_run": true
-}
-```
-
-```json
-{
-  "motion_json": [
-    {
-      "time": 0,
-      "poseData": [36个浮点数],
-      "jointValues": {
-        "waist_pitch_joint": 0.086,
-        "...": "..."
-      }
+[
+  {
+    "id": 0,
+    "time": 0.0,
+    "poseData": [36个浮点数],
+    "jointValues": {
+      "left_shoulder_pitch_joint": 4.975
     }
-  ],
-  "fps": 60,
-  "net": "eno0",
-  "dry_run": true
-}
+  }
+]
 ```
 
-字段说明：  
-- `poseData`：长度 36，按 CSV 列顺序：`root_pos_x...right_wrist_yaw_joint`。  
-- `jointValues`：可选，键必须是 `SDK` 关节名，值单位是角度（°），如提供会校验与 `poseData[7:36]`（弧度）一致。
+字段规则：
 
-- `GET /api/motions/{motion}/json?fps=60`
+- `poseData` 必填，长度必须是 36，单位为弧度。
+- `jointValues` 可选，单位为角度；如果提供，会校验它与 `poseData[7:36]` 一致。
+- `id`、`time` 可选，主要用于前端或调试。
 
-- `GET /api/motions/{motion}`
+## 控制原理
 
-- `POST /api/motions`（创建新动作，写入 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`）
+采用 SDK 的 `rt/arm_sdk` 话题和 weight 机制，与官方 `g1_arm7_sdk_dds_example` 一致。
 
-- `PUT /api/motions/{motion}`（更新已有动作）
+```text
+Motor_real = weight * User_Cmd + (1 - weight) * BuiltIn_Cmd
+```
 
-返回该 CSV 的 `[{id,time,poseData,jointValues}]` 调试 payload，用于前端发送/日志对比。
+执行流程：
 
-测试资源（本地联调直接可用）：
-- `assets/json/wave.json`
-- `assets/json/zuoyi.json`
+1. 连接 DDS，读取所有关节当前位置。
+2. `weight` 从 `0` 增加到 `1.0`，逐步接管上肢控制，同时下肢保持初始位置。
+3. 平滑过渡到首帧，Transition 阶段速度钳位 `0.5 rad/s`。
+4. 按帧回放，Replay 阶段速度钳位 `0.8 rad/s`。
+5. 平滑回到初始姿态。
+6. `weight` 从 `1.0` 降到 `0`，交还内置控制。
 
-JSON 数据用于 `/api/replay` 的 `motion_json` 入参。接口会把该 payload 转发给
-`json_replay` 执行，并在本地异步保留一份 `assets/json/<name>.json` 与 `assets/csv/<name>.csv` 便于调试追踪。
+关键控制参数：
 
-如果配置了环境变量 `MOTION_API_KEY`，则 `POST /api/replay`、`POST /api/replay/validate`
-、`POST /api/motions`、`PUT /api/motions/{motion}` 需要携带鉴权头（`Authorization: Bearer <token>` 或
-`X-API-Key: <token>`）。未配置则保持免鉴权，便于本地调试。
+| 参数 | 值 | 说明 |
+|------|----|------|
+| `kTransitionMaxVel` | `0.5 rad/s` | 过渡阶段速度钳位 |
+| `kReplayMaxVel` | `0.8 rad/s` | 回放阶段速度钳位 |
+| `kFinalWeightTarget` | `1.0` | 完全接管控制 |
+
+稳定性措施：
+
+- 回放前执行 `BalanceStand()`。
+- 回放前执行 `LowStand()`。
+- 下肢关节每帧保持初始位置。
+- 腰、腿、手臂按电机类型设置不同 PD 增益。
+
+## 测试与验证
+
+Python 语法检查：
+
+```bash
+python3 -m compileall -q api tests
+```
+
+Python 测试：
+
+```bash
+pytest -q
+```
+
+只测 API：
+
+```bash
+pytest -q tests/test_api.py
+```
+
+只测数据解析：
+
+```bash
+pytest -q tests/test_csv_motion.py
+```
+
+C++ 编译验证：
+
+```bash
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+```
+
+机器人连接验证：
+
+```bash
+./build/test_connection eno0
+```
 
 ## 常见问题
 
-### libddsc.so.0 not found
+### `thirdparty/unitree_sdk2` 为空
 
-```bash
-./build/csv_replay 或 ./build/json_replay: error while loading shared libraries: libddsc.so.0
+现象：
+
+```text
+CMake Error at CMakeLists.txt: add_subdirectory given source "thirdparty/unitree_sdk2" which is not an existing directory
 ```
 
-原因：SDK 目录里有 `libddsc.so` 但运行时需要 `libddsc.so.0`。
+或：
 
-修复：
-
-```bash
-cd build && cmake ..
+```text
+The source directory .../thirdparty/unitree_sdk2 does not contain a CMakeLists.txt file.
 ```
 
-CMake 会在 `build/` 目录创建 `.so.0` 软链接（不会修改子模块）。
+处理：
 
-### weight=1.0 时下肢前跑
+```bash
+git submodule update --init --recursive
+test -f thirdparty/unitree_sdk2/CMakeLists.txt && echo "unitree_sdk2 ok"
+```
 
-现象：执行动作时机器人偶尔会往前跑几步。
+### `fastapi` / `pytest` 找不到
 
-原因：`rt/arm_sdk` 的 weight 机制是全局的。当 weight=1.0 时，所有关节（包括下肢）都由用户指令控制。如果 `send()` 只设置了上肢关节，下肢关节会收到默认值（0），导致失去平衡。
+现象：
 
-修复：在 `send()` 中同时发送下肢关节的保持指令，读取初始位置后每帧都以低增益 PD 控制下肢保持原位。
+```text
+ModuleNotFoundError: No module named 'fastapi'
+ModuleNotFoundError: No module named 'pytest'
+```
 
-### 动作执行不到位（跟踪误差大）
+处理：
 
-现象：机器人动作幅度明显小于关键帧指定的幅度。
+```bash
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+```
 
-原因：之前 Replay 阶段有速度钳位（0.5 rad/s），当 CSV 帧间角度变化大时，指令位置永远追不上目标。
+### `csv_replay` 或 `json_replay` 不存在
 
-修复：
-1. 按电机类型设置分关节 PD 增益（手臂 Kp=60，膝关节 Kp=100）
-2. Replay 阶段使用更宽松的速度钳位（0.8 rad/s）
-3. weight 从 0.6 提高到 1.0，消除内置控制器的抵抗
+现象：API 返回 `replay_error`，提示 `build/csv_replay` 或 `build/json_replay` 不存在。
 
-### 上肢动作时腰部/下肢不稳
+处理：
 
-现象：执行上肢动作时，机器人腰部摆动或自动迈步。
+```bash
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+```
 
-原因：上肢动作改变重心，内置运控自动补偿（用腰或腿）。
+### `libddsc.so.0 not found`
 
-缓解措施：
-1. `BalanceStand()` — 回放前切换到平衡站立模式，抑制自动迈步
-2. `LowStand()` — 降低重心，增大稳定裕度
-3. 提高腰/腿 PD 增益 — 让腰更硬，抵抗运控补偿
-4. 降低回放速度 — 给运控更多时间适应重心变化
+现象：
 
-### 子模块显示 modified content
+```text
+./build/csv_replay: error while loading shared libraries: libddsc.so.0
+```
 
-现象：`git status` 显示 `thirdparty/unitree_sdk2 (modified content)`。
+处理：
 
-原因：cmake 在子模块目录内创建了 `.so.0` 软链接或产生了构建残留。
+```bash
+cmake -S . -B build
+```
 
-修复：
+CMake 会在 `build/` 创建运行时软链接。如果仍失败，确认 `thirdparty/unitree_sdk2/thirdparty/lib/<arch>/libddsc.so` 存在。
+
+### 子模块显示 `modified content`
+
+现象：
+
+```bash
+git status
+# thirdparty/unitree_sdk2 (modified content)
+```
+
+处理：
 
 ```bash
 cd thirdparty/unitree_sdk2
+git status
 git checkout -- .
 git clean -fd
 cd ../..
 ```
 
-预防：CMakeLists.txt 已修改为在 build 目录创建软链接，不再修改子模块。
+不要在子模块目录内编译或写入临时文件。当前 CMake 已把运行时软链接放在 `build/`，正常编译不会污染子模块。
 
-## 安全
+### 机器人连接不上
 
-- 首次运行建议有人在旁边
-- 遥控器 L2+B 急停
-- 下肢关节保持初始位置（按电机类型设置增益）
-- Disengage 阶段先回到初始姿态再释放控制权
-- `BalanceStand()` + `LowStand()` 提高稳定性
+检查项：
+
+- 网线是否连接到正确网口。
+- `ip -br a` 中是否能看到有线网卡。
+- 电脑 IP 是否在 `192.168.123.0/24`。
+- 是否能 `ping 192.168.123.164`。
+- API 请求里的 `net` 是否等于实际网卡名。
+
+## 安全注意事项
+
+- 首次运行必须有人在机器人旁边观察。
+- 确认遥控器急停可用。
+- 先跑 `test_connection`，再执行真实动作。
+- 首次动作建议低帧率或短动作验证。
+- 执行前确认机器人周围无障碍物。
+- 真实回放接口必须显式传 `dry_run: false`。
+- 建议在非本机访问 API 时配置 `MOTION_API_KEY`。

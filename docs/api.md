@@ -51,14 +51,69 @@ CSV/JSON 包含 36 个值，程序只驱动上肢 **17 个关节**：
 
 ---
 
+## 运行前提
+
+API 服务依赖 Python 包和 C++ 回放二进制：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+```
+
+如果只做接口查询、动作创建或 `dry_run=true` 校验，可以暂时不连接机器人；如果要 `dry_run=false` 真实执行，需要：
+
+- `build/csv_replay` 和 `build/json_replay` 已编译存在。
+- `thirdparty/unitree_sdk2` 子模块完整。
+- 电脑与 G1 在同一有线网段。
+- 请求中的 `net` 字段等于实际网卡名。
+
 ## 启动服务
 
 ```bash
-# 前台运行（可看日志，Ctrl+C 停止）
-python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+# 本机访问
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
-# 后台运行
-nohup python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+# 局域网访问
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# 后台运行，日志写入 api.log
+nohup python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+## 认证
+
+默认不启用认证，方便本地联调。
+
+如果设置环境变量 `MOTION_API_KEY`，以下写操作需要鉴权：
+
+- `POST /api/replay`
+- `POST /api/replay/validate`
+- `POST /api/motions`
+- `PUT /api/motions/{motion}`
+
+启动前设置：
+
+```bash
+export MOTION_API_KEY="replace-with-a-long-random-token"
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+请求时二选一：
+
+```bash
+curl -H "X-API-Key: replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
+curl -H "Authorization: Bearer replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
 ```
 
 ---
@@ -112,7 +167,7 @@ nohup python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
 
 ### 2. `GET /api/motions`
 
-列出 `assets/` 目录下所有合法的动作 CSV 文件。
+列出 `assets/csv/` 目录下所有合法的动作 CSV 文件。
 
 **请求参数：** 无
 
@@ -221,6 +276,8 @@ GET /api/motions/wave/json?fps=30
 
 验证回放请求的合法性，不执行动作。请求体与 `/api/replay` 完全相同（见下方）。
 
+如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
+
 **响应示例：**
 
 ```json
@@ -247,6 +304,8 @@ GET /api/motions/wave/json?fps=30
 ### 5. `POST /api/replay`
 
 执行动作回放。核心接口。
+
+如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
 
 **请求体（JSON）：**
 
@@ -362,6 +421,8 @@ GET /api/motions/wave/json?fps=30
 
 创建一个动作。
 
+如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
+
 **请求体：**
 
 ```json
@@ -406,6 +467,8 @@ GET /api/motions/wave/json?fps=30
 
 更新已存在的动作。该接口会把传入 `motion_json` 全量覆盖到指定动作文件。
 
+如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
+
 **请求体：**
 
 ```json
@@ -441,18 +504,6 @@ GET /api/motions/wave/json?fps=30
 
 当目标动作不存在时返回 `404 motion_not_found`。
 
-## 认证说明
-
-如果设置环境变量 `MOTION_API_KEY`，则 `POST /api/replay`、`POST /api/replay/validate`、
-`POST /api/motions`、`PUT /api/motions/{motion}` 需要鉴权。支持以下方式之一：
-
-- `Authorization: Bearer <token>`
-- `X-API-Key: <token>`
-
-未配置 `MOTION_API_KEY` 时，接口不启用鉴权（兼容本地快速联调）。
-
----
-
 ## 错误码
 
 | code | HTTP 状态码 | 说明 |
@@ -471,37 +522,102 @@ GET /api/motions/wave/json?fps=30
 ## 请求示例
 
 ```bash
+BASE=http://127.0.0.1:8000
+API_KEY=replace-with-a-long-random-token
+
 # 健康检查
-curl http://localhost:8000/health
+curl "$BASE/health"
 
 # 列出所有动作
-curl http://localhost:8000/api/motions
+curl "$BASE/api/motions"
+
+# 获取单个动作元数据
+curl "$BASE/api/motions/wave"
 
 # 获取动作 JSON 帧
-curl "http://localhost:8000/api/motions/wave/json?fps=30"
+curl "$BASE/api/motions/wave/json?fps=30"
+```
 
-# 验证（不执行）
-curl -X POST http://localhost:8000/api/replay \
-  -H "Content-Type: application/json" \
-  -d '{"motion": "wave", "fps": 60, "dry_run": true}'
+如果启用了 `MOTION_API_KEY`，写接口需要加鉴权头；如果未启用，删除 `-H "X-API-Key: $API_KEY"` 即可。
 
-# 执行 wave 动作
-curl -X POST http://localhost:8000/api/replay \
+创建动作：
+
+```bash
+python3 - <<'PY' >/tmp/create_motion.json
+import json
+import sys
+json.dump({
+    "name": "demo",
+    "fps": 60,
+    "motion_json": [
+        {"time": 0, "poseData": [0.0] * 36}
+    ],
+}, sys.stdout)
+PY
+
+curl -X POST "$BASE/api/motions" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  --data-binary @/tmp/create_motion.json
+```
+
+更新动作：
+
+```bash
+python3 - <<'PY' >/tmp/update_motion.json
+import json
+import sys
+json.dump({
+    "fps": 60,
+    "motion_json": [
+        {"time": 0, "poseData": [0.0] * 36},
+        {"time": 1 / 60, "poseData": [0.01] * 36},
+    ],
+}, sys.stdout)
+PY
+
+curl -X PUT "$BASE/api/motions/demo" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  --data-binary @/tmp/update_motion.json
+```
+
+校验动作回放：
+
+```bash
+curl -X POST "$BASE/api/replay/validate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": true}'
+```
+
+执行已有 CSV 动作：
+
+```bash
+curl -X POST "$BASE/api/replay" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
   -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": false}'
+```
 
-# 执行 zuoyi 动作，50fps
-curl -X POST http://localhost:8000/api/replay \
-  -H "Content-Type: application/json" \
-  -d '{"motion": "zuoyi", "fps": 50, "net": "eno0", "dry_run": false}'
+执行 JSON payload：
 
-# 通过 motion_json 执行
-curl -X POST http://localhost:8000/api/replay \
-  -H "Content-Type: application/json" \
-  -d '{"motion_json": [{"poseData": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "jointValues": {"waist_pitch_joint": 0.0}}], "dry_run": false}'
+```bash
+python3 - <<'PY' >/tmp/replay_json.json
+import json
+import sys
+json.dump({
+    "motion_json": [
+        {"time": 0, "poseData": [0.0] * 36}
+    ],
+    "fps": 60,
+    "net": "eno0",
+    "dry_run": False,
+}, sys.stdout)
+PY
 
-# 通过 csv_path 指定文件
-curl -X POST http://localhost:8000/api/replay \
+curl -X POST "$BASE/api/replay" \
   -H "Content-Type: application/json" \
-  -d '{"csv_path": "assets/csv/wave.csv", "dry_run": false}'
+  -H "X-API-Key: $API_KEY" \
+  --data-binary @/tmp/replay_json.json
 ```
