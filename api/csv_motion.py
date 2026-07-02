@@ -50,6 +50,12 @@ class MotionMetadata:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class ParsedMotionCsv:
+    frames: int
+    first_frame: list[float]
+
+
 def _repo_relative(path: Path, repo_root: Path | None) -> str:
     if repo_root is None:
         return path.name
@@ -67,10 +73,11 @@ def _is_inside_repo(path: Path, repo_root: Path) -> bool:
         return False
 
 
-def _parse_valid_joint_rows(path: Path) -> list[list[float]]:
-    frames: list[list[float]] = []
+def _parse_motion_csv(path: Path) -> ParsedMotionCsv:
+    frames = 0
+    first_frame: list[float] | None = None
     with path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.reader(handle)
+        reader = csv.reader(handle, strict=True)
         for row in reader:
             if not row:
                 continue
@@ -85,8 +92,12 @@ def _parse_valid_joint_rows(path: Path) -> list[list[float]]:
                     "invalid_csv",
                     "CSV must contain only finite numeric values.",
                 )
-            frames.append(values[7:36])
-    return frames
+            frames += 1
+            if first_frame is None:
+                first_frame = values[7:36]
+    if first_frame is None:
+        first_frame = []
+    return ParsedMotionCsv(frames=frames, first_frame=first_frame)
 
 
 def load_motion_csv(path: Path, repo_root: Path | None = None) -> MotionMetadata:
@@ -96,25 +107,25 @@ def load_motion_csv(path: Path, repo_root: Path | None = None) -> MotionMetadata
         raise CsvMotionError("csv_not_found", f"CSV path is not a file: {path}")
 
     try:
-        frames = _parse_valid_joint_rows(path)
+        parsed = _parse_motion_csv(path)
     except (UnicodeDecodeError, csv.Error, OSError) as exc:
         raise CsvMotionError(
             "invalid_csv",
             "CSV must contain valid UTF-8 numeric rows.",
         ) from exc
-    if not frames:
+    if not parsed.frames:
         raise CsvMotionError(
             "invalid_csv",
             "CSV must contain at least one valid 36-column numeric frame.",
         )
 
-    first_frame = frames[0]
+    first_frame = parsed.first_frame
     first_frame_arm_joints = [first_frame[index] for index in ARM_JOINT_INDICES]
     return MotionMetadata(
         name=path.stem,
         csv_path=_repo_relative(path, repo_root or path.parent.parent),
-        frames=len(frames),
-        duration_seconds=len(frames) / DEFAULT_METADATA_FPS,
+        frames=parsed.frames,
+        duration_seconds=parsed.frames / DEFAULT_METADATA_FPS,
         columns=EXPECTED_COLUMNS,
         controlled_joint_count=len(ARM_JOINT_INDICES),
         first_frame_arm_joints=first_frame_arm_joints,

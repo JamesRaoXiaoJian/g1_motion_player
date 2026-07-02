@@ -103,6 +103,17 @@ def test_load_motion_csv_rejects_non_utf8_file(tmp_path):
     assert excinfo.value.code == "invalid_csv"
 
 
+def test_load_motion_csv_rejects_malformed_csv(tmp_path):
+    bad_csv = tmp_path / "bad.csv"
+    bad_csv.write_text('"unterminated\n', encoding="utf-8")
+
+    with pytest.raises(CsvMotionError) as excinfo:
+        load_motion_csv(bad_csv, repo_root=tmp_path)
+
+    assert excinfo.value.code == "invalid_csv"
+    assert "valid UTF-8" in excinfo.value.message
+
+
 def test_load_motion_csv_rejects_non_finite_values(tmp_path):
     csv_path = tmp_path / "bad.csv"
     row = ["0"] * 36
