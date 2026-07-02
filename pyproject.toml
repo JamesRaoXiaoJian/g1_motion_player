@@ -17,6 +17,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# This environment autoloads unrelated ROS pytest plugins that can fail before collection.
 addopts = [
   "-p", "no:launch_testing",
   "-p", "no:launch_ros"

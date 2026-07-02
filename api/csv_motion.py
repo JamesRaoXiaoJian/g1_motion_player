@@ -89,7 +89,13 @@ def load_motion_csv(path: Path, repo_root: Path | None = None) -> MotionMetadata
     if not path.is_file():
         raise CsvMotionError("csv_not_found", f"CSV path is not a file: {path}")
 
-    frames = _parse_valid_joint_rows(path)
+    try:
+        frames = _parse_valid_joint_rows(path)
+    except (UnicodeDecodeError, csv.Error, OSError) as exc:
+        raise CsvMotionError(
+            "invalid_csv",
+            "CSV must contain valid UTF-8 numeric rows.",
+        ) from exc
     if not frames:
         raise CsvMotionError(
             "invalid_csv",

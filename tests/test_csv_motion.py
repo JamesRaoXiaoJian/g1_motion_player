@@ -79,6 +79,16 @@ def test_load_motion_csv_counts_final_row_without_trailing_newline(tmp_path):
     assert metadata.frames == 2
 
 
+def test_load_motion_csv_rejects_non_utf8_file(tmp_path):
+    bad_csv = tmp_path / "bad.csv"
+    bad_csv.write_bytes(b"\xff\xfe\x00\x00")
+
+    with pytest.raises(CsvMotionError) as excinfo:
+        load_motion_csv(bad_csv, repo_root=tmp_path)
+
+    assert excinfo.value.code == "invalid_csv"
+
+
 def test_load_motion_csv_rejects_file_without_valid_frames(tmp_path):
     bad_csv = tmp_path / "bad.csv"
     bad_csv.write_text("1,2,3\nnot,a,number\n", encoding="utf-8")
