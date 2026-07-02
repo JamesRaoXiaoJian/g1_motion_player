@@ -69,10 +69,8 @@ def _is_inside_repo(path: Path, repo_root: Path) -> bool:
 def _parse_valid_joint_rows(path: Path) -> list[list[float]]:
     frames: list[list[float]] = []
     with path.open(newline="", encoding="utf-8") as handle:
-        for line in handle:
-            if frames and not line.endswith(("\n", "\r")):
-                continue
-            row = next(csv.reader([line]))
+        reader = csv.reader(handle)
+        for row in reader:
             if not row:
                 continue
             if len(row) != EXPECTED_COLUMNS:
@@ -135,10 +133,27 @@ def resolve_csv_path(repo_root: Path, motion: str | None, csv_path: str | None) 
 
     if has_motion:
         motion_name = str(motion).strip()
-        if not motion_name:
-            raise CsvMotionError("invalid_request", "motion must not be empty.")
-        resolved = repo_root / "assets" / f"{motion_name}.csv"
-        if not resolved.exists():
+        motion_path = Path(motion_name)
+        if (
+            not motion_name
+            or motion_name in {".", ".."}
+            or motion_path.name != motion_name
+            or "/" in motion_name
+            or "\\" in motion_name
+            or motion_path.is_absolute()
+        ):
+            raise CsvMotionError(
+                "invalid_request",
+                "motion must be a motion name, not a path.",
+            )
+        assets_dir = (repo_root / "assets").resolve()
+        resolved = (assets_dir / f"{motion_name}.csv").resolve()
+        if not _is_inside_repo(resolved, assets_dir):
+            raise CsvMotionError(
+                "invalid_request",
+                "motion must be a motion name, not a path.",
+            )
+        if not resolved.exists() or not resolved.is_file():
             raise CsvMotionError("motion_not_found", f"Motion not found: {motion_name}")
         return resolved
 

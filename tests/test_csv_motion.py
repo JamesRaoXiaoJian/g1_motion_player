@@ -18,10 +18,10 @@ def test_load_motion_csv_returns_metadata_for_asset_wave():
 
     assert metadata.name == "wave"
     assert metadata.csv_path == "assets/wave.csv"
-    assert metadata.frames == 599
+    assert metadata.frames == 600
     assert metadata.columns == 36
     assert metadata.controlled_joint_count == 17
-    assert metadata.duration_seconds == pytest.approx(599 / 60.0)
+    assert metadata.duration_seconds == pytest.approx(600 / 60.0)
     assert metadata.first_frame_arm_joints[:2] == pytest.approx([0.0868397, 0.12404])
 
 
@@ -30,7 +30,7 @@ def test_discover_motions_lists_assets_sorted_by_name():
 
     names = [motion.name for motion in motions]
     assert names == ["wave", "zuoyi"]
-    assert all(motion.frames == 599 for motion in motions)
+    assert all(motion.frames == 600 for motion in motions)
 
 
 def test_resolve_csv_path_accepts_motion_name():
@@ -53,6 +53,30 @@ def test_resolve_csv_path_rejects_path_outside_repo():
 
     assert excinfo.value.code == "invalid_request"
     assert "inside the repository" in excinfo.value.message
+
+
+def test_resolve_csv_path_rejects_parent_path_motion_name():
+    with pytest.raises(CsvMotionError) as excinfo:
+        resolve_csv_path(REPO_ROOT, motion="../wave", csv_path=None)
+
+    assert excinfo.value.code == "invalid_request"
+
+
+def test_resolve_csv_path_rejects_nested_motion_name():
+    with pytest.raises(CsvMotionError) as excinfo:
+        resolve_csv_path(REPO_ROOT, motion="nested/wave", csv_path=None)
+
+    assert excinfo.value.code == "invalid_request"
+
+
+def test_load_motion_csv_counts_final_row_without_trailing_newline(tmp_path):
+    csv_path = tmp_path / "motion.csv"
+    row = ",".join(str(index) for index in range(36))
+    csv_path.write_text(f"{row}\n{row}", encoding="utf-8")
+
+    metadata = load_motion_csv(csv_path, repo_root=tmp_path)
+
+    assert metadata.frames == 2
 
 
 def test_load_motion_csv_rejects_file_without_valid_frames(tmp_path):
