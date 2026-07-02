@@ -88,6 +88,8 @@ build/test_connection
 
 ## 在 G1 PC2 上运行
 
+完整部署步骤见 [docs/g1_robot_deployment.md](docs/g1_robot_deployment.md)。远端拉取和部署提示词见 [docs/remote_pull_prompt.md](docs/remote_pull_prompt.md)。
+
 先确认网卡名：
 
 ```bash
