@@ -182,7 +182,20 @@ Motor_real = weight × User_Cmd + (1 - weight) × BuiltIn_Cmd
 
 ## CSV 格式
 
-LAFAN1 retargeting 格式，每行 36 列，无表头：
+已新增表头，前 7 列是根坐标与姿态，后 29 列是关节角度（弧度），对应关节名如下：
+
+```
+root_pos_x,root_pos_y,root_pos_z,root_quat_x,root_quat_y,root_quat_z,root_quat_w,
+left_hip_pitch_joint,left_hip_roll_joint,left_hip_yaw_joint,left_knee_joint,left_ankle_joint,left_ankle_roll_joint,
+right_hip_pitch_joint,right_hip_roll_joint,right_hip_yaw_joint,right_knee_joint,right_ankle_joint,right_ankle_roll_joint,
+waist_yaw_joint,waist_roll_joint,waist_pitch_joint,
+left_shoulder_pitch_joint,left_shoulder_roll_joint,left_shoulder_yaw_joint,left_elbow_joint,
+left_wrist_roll_joint,left_wrist_pitch_joint,left_wrist_yaw_joint,
+right_shoulder_pitch_joint,right_shoulder_roll_joint,right_shoulder_yaw_joint,right_elbow_joint,
+right_wrist_roll_joint,right_wrist_pitch_joint,right_wrist_yaw_joint
+```
+
+LAFAN1 retargeting 格式，每行 36 列（支持有表头/无表头）：
 
 ```
 列 0-2:   根节点位置 XYZ（忽略）
@@ -205,8 +218,64 @@ LAFAN1 retargeting 格式，每行 36 列，无表头：
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `net` | 网卡名 | eno0 |
-| `csv` | CSV 文件路径 | 必填 |
+| `motion` / `csv_path` | 动作名（assets 下）或 CSV 路径 | 选填二选一，与 `motion_json` 互斥 |
+| `motion_json` | JSON 形式轨迹 payload | 选填，与 `motion`/`csv_path` 互斥 |
 | `fps` | 控制帧率 | 60 |
+
+### 本地 API 请求格式（新增）
+
+- `POST /api/replay/validate`
+
+请求字段采用 JSON，且必须且只能给出一种来源：`motion`、`csv_path` 或 `motion_json`。  
+以下是三种合法样例之一（与 `motion_json` 不可混用）：
+
+```json
+{
+  "motion": "wave",
+  "fps": 60,
+  "net": "eno0",
+  "dry_run": true
+}
+```
+
+```json
+{
+  "csv_path": "assets/wave.csv",
+  "fps": 60,
+  "net": "eno0",
+  "dry_run": true
+}
+```
+
+```json
+{
+  "motion_json": [
+    {
+      "time": 0,
+      "poseData": [36个浮点数],
+      "jointValues": {
+        "waist_pitch_joint": 0.086,
+        "...": "..."
+      }
+    }
+  ],
+  "fps": 60,
+  "net": "eno0",
+  "dry_run": true
+}
+```
+
+字段说明：  
+- `poseData`：长度 36，按 CSV 列顺序：`root_pos_x...right_wrist_yaw_joint`。  
+- `jointValues`：可选，键必须是 `SDK` 关节名，值单位是角度（°），如提供会校验与 `poseData[7:36]`（弧度）一致。
+
+- `GET /api/motions/{motion}/json?fps=60`
+
+返回该 CSV 的 `[{id,time,poseData,jointValues}]` 调试 payload，用于前端发送/日志对比。
+
+测试资源（本地联调直接可用）：
+- `assets/wave_debug.json`
+- `assets/zuoyi_debug.json`
 
 ## 常见问题
 

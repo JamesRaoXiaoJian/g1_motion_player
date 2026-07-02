@@ -1,11 +1,14 @@
 from pathlib import Path
+import json
 
 import pytest
 
 from api.csv_motion import (
     CsvMotionError,
     discover_motions,
+    load_motion_csv_as_json,
     load_motion_csv,
+    load_motion_json,
     resolve_csv_path,
 )
 
@@ -23,6 +26,62 @@ def test_load_motion_csv_returns_metadata_for_asset_wave():
     assert metadata.controlled_joint_count == 17
     assert metadata.duration_seconds == pytest.approx(600 / 60.0)
     assert metadata.first_frame_arm_joints[:2] == pytest.approx([0.0868397, 0.12404])
+
+
+def test_load_motion_csv_with_header_row_is_valid():
+    metadata = load_motion_csv(REPO_ROOT / "assets" / "wave.csv")
+
+    assert metadata.frames == 600
+
+
+def test_load_motion_json_from_pose_frames():
+    metadata = load_motion_json(
+        frames=[
+            {"poseData": [float(index) for index in range(36)], "time": 0},
+            {"poseData": [float(index) + 1 for index in range(36)], "time": 1},
+        ],
+        source_name="debug",
+        fps=30.0,
+    )
+
+    assert metadata.name == "debug"
+    assert metadata.frames == 2
+    assert metadata.duration_seconds == pytest.approx(2 / 30.0)
+    assert metadata.first_frame_arm_joints[:2] == pytest.approx([22.0, 23.0])
+
+
+def test_load_motion_json_rejects_empty_payload():
+    with pytest.raises(CsvMotionError) as excinfo:
+        load_motion_json([], source_name="debug")
+
+    assert excinfo.value.code == "invalid_json"
+
+
+def test_load_motion_json_compatible_with_sample_debug_payload():
+    frames = load_motion_csv_as_json(REPO_ROOT / "assets" / "wave.csv", fps=50.0)
+    metadata = load_motion_json(frames=frames, source_name="wave", fps=50.0)
+
+    assert metadata.name == "wave"
+    assert metadata.frames == 600
+
+
+def test_load_motion_json_rejects_joint_inconsistency():
+    pose = [0.0] * 36
+    pose[22] = 1.0
+
+    with pytest.raises(CsvMotionError) as excinfo:
+        load_motion_json(
+            frames=[
+                {
+                    "poseData": pose,
+                    "jointValues": {"left_shoulder_pitch_joint": 10.0},
+                }
+            ],
+            source_name="debug",
+            fps=60.0,
+        )
+
+    assert excinfo.value.code == "invalid_json"
 
 
 def test_discover_motions_lists_assets_sorted_by_name():
@@ -158,3 +217,35 @@ def test_load_motion_csv_rejects_file_without_valid_frames(tmp_path):
         load_motion_csv(bad_csv, repo_root=tmp_path)
 
     assert excinfo.value.code == "invalid_csv"
+
+
+def test_csv_to_json_payload_includes_joint_names():
+    payload = load_motion_csv_as_json(REPO_ROOT / "assets" / "wave.csv", fps=50.0)
+    first = payload[0]
+
+    assert len(payload) == 600
+    assert first["id"] == 0
+    assert first["time"] == 0.0
+    assert first["poseData"][0] == pytest.approx(0.0303281)
+    assert first["jointValues"]["left_shoulder_pitch_joint"] == pytest.approx(4.975548304182215, rel=1e-9)
+
+
+def test_debug_json_payload_matches_csv_relation():
+    frames = json.loads((REPO_ROOT / "assets" / "wave_debug.json").read_text(encoding="utf-8"))
+    metadata = load_motion_json(frames=frames, source_name="wave_debug", fps=60.0)
+
+    assert metadata.name == "wave_debug"
+    assert metadata.frames == 600
+    assert metadata.first_frame_arm_joints[:2] == pytest.approx([0.0868397, 0.12404], rel=1e-9)
+
+
+def test_zuoyi_debug_json_payload_matches_csv_relation():
+    frames = json.loads((REPO_ROOT / "assets" / "zuoyi_debug.json").read_text(encoding="utf-8"))
+    metadata = load_motion_json(frames=frames, source_name="zuoyi_debug", fps=60.0)
+
+    csv_metadata = load_motion_csv(REPO_ROOT / "assets" / "zuoyi.csv")
+
+    assert metadata.name == "zuoyi_debug"
+    assert metadata.frames == 600
+    assert metadata.frames == csv_metadata.frames
+    assert metadata.first_frame_arm_joints == pytest.approx(csv_metadata.first_frame_arm_joints, rel=1e-9)
