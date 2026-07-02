@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -79,6 +80,11 @@ def _parse_valid_joint_rows(path: Path) -> list[list[float]]:
                 values = [float(cell) for cell in row]
             except ValueError:
                 continue
+            if not all(math.isfinite(value) for value in values):
+                raise CsvMotionError(
+                    "invalid_csv",
+                    "CSV must contain only finite numeric values.",
+                )
             frames.append(values[7:36])
     return frames
 
@@ -170,6 +176,13 @@ def resolve_csv_path(repo_root: Path, motion: str | None, csv_path: str | None) 
             "invalid_request",
             "csv_path must point to a CSV file inside the repository.",
         )
-    if not resolved.exists():
+    if resolved.exists() and not resolved.is_file():
+        raise CsvMotionError("csv_not_found", f"CSV file does not exist: {csv_path}")
+    if resolved.suffix.lower() != ".csv":
+        raise CsvMotionError(
+            "invalid_request",
+            "csv_path must point to a CSV file.",
+        )
+    if not resolved.exists() or not resolved.is_file():
         raise CsvMotionError("csv_not_found", f"CSV file does not exist: {csv_path}")
     return resolved

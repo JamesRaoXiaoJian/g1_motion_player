@@ -55,6 +55,20 @@ def test_resolve_csv_path_rejects_path_outside_repo():
     assert "inside the repository" in excinfo.value.message
 
 
+def test_resolve_csv_path_rejects_non_csv_suffix():
+    with pytest.raises(CsvMotionError) as excinfo:
+        resolve_csv_path(REPO_ROOT, motion=None, csv_path="README.md")
+
+    assert excinfo.value.code == "invalid_request"
+
+
+def test_resolve_csv_path_rejects_directory():
+    with pytest.raises(CsvMotionError) as excinfo:
+        resolve_csv_path(REPO_ROOT, motion=None, csv_path="assets")
+
+    assert excinfo.value.code == "csv_not_found"
+
+
 def test_resolve_csv_path_rejects_parent_path_motion_name():
     with pytest.raises(CsvMotionError) as excinfo:
         resolve_csv_path(REPO_ROOT, motion="../wave", csv_path=None)
@@ -85,6 +99,18 @@ def test_load_motion_csv_rejects_non_utf8_file(tmp_path):
 
     with pytest.raises(CsvMotionError) as excinfo:
         load_motion_csv(bad_csv, repo_root=tmp_path)
+
+    assert excinfo.value.code == "invalid_csv"
+
+
+def test_load_motion_csv_rejects_non_finite_values(tmp_path):
+    csv_path = tmp_path / "bad.csv"
+    row = ["0"] * 36
+    row[7] = "nan"
+    csv_path.write_text(",".join(row), encoding="utf-8")
+
+    with pytest.raises(CsvMotionError) as excinfo:
+        load_motion_csv(csv_path, repo_root=tmp_path)
 
     assert excinfo.value.code == "invalid_csv"
 
