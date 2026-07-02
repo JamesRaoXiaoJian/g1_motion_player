@@ -1,5 +1,6 @@
 from pathlib import Path
 import pytest
+import shutil
 
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def make_client() -> TestClient:
     return TestClient(create_app(repo_root=REPO_ROOT))
+
+
+def make_client_for_root(root: Path) -> TestClient:
+    return TestClient(create_app(repo_root=root))
 
 
 def test_health_returns_ok_envelope():
@@ -33,6 +38,100 @@ def test_motions_returns_assets_with_metadata():
     assert body["error"] is None
     assert [motion["name"] for motion in body["data"]["motions"]] == ["wave", "zuoyi"]
     assert body["data"]["motions"][0]["frames"] == 600
+
+
+def test_motions_detail_returns_metadata():
+    response = make_client().get("/api/motions/wave")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["name"] == "wave"
+    assert body["data"]["csv_path"] == "assets/csv/wave.csv"
+    assert body["data"]["frames"] == 600
+
+
+def test_create_motion_with_json_payload(tmp_path: Path):
+    root = tmp_path
+    (root / "assets/csv").mkdir(parents=True, exist_ok=True)
+    (root / "assets/json").mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO_ROOT / "assets/csv/wave.csv", root / "assets/csv/wave.csv")
+    client = make_client_for_root(root)
+
+    response = client.post(
+        "/api/motions",
+        json={
+            "name": "demo_payload",
+            "fps": 30,
+            "motion_json": [
+                {"time": 0, "poseData": [float(i) for i in range(36)]},
+                {"time": 1, "poseData": [float(i) + 1 for i in range(36)]},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["motion"] == "demo_payload"
+    assert body["data"]["motion_json_path"] == "assets/json/demo_payload.json"
+    assert body["data"]["motion_csv_path"] == "assets/csv/demo_payload.csv"
+    assert body["data"]["frames"] == 2
+    assert (root / "assets/json/demo_payload.json").exists()
+    assert (root / "assets/csv/demo_payload.csv").exists()
+
+    detail = client.get("/api/motions/demo_payload").json()
+    assert detail["ok"] is True
+    assert detail["data"]["frames"] == 2
+    assert detail["data"]["duration_seconds"] == pytest.approx(2 / 30)
+
+
+def test_create_motion_rejects_duplicate_name(tmp_path: Path):
+    root = tmp_path
+    (root / "assets/csv").mkdir(parents=True, exist_ok=True)
+    (root / "assets/json").mkdir(parents=True, exist_ok=True)
+    client = make_client_for_root(root)
+
+    payload = {
+        "name": "demo",
+        "fps": 60,
+        "motion_json": [{"time": 0, "poseData": [0.0] * 36}],
+    }
+
+    first = client.post("/api/motions", json=payload)
+    assert first.status_code == 200
+
+    second = client.post("/api/motions", json=payload)
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "motion_exists"
+
+
+def test_create_motion_with_overwrite(tmp_path: Path):
+    root = tmp_path
+    (root / "assets/csv").mkdir(parents=True, exist_ok=True)
+    (root / "assets/json").mkdir(parents=True, exist_ok=True)
+    client = make_client_for_root(root)
+
+    payload = {
+        "name": "demo",
+        "fps": 60,
+        "motion_json": [{"time": 0, "poseData": [float(i) for i in range(36)]}],
+    }
+    create1 = client.post("/api/motions", json=payload)
+    assert create1.status_code == 200
+
+    overwrite_payload = {
+        "name": "demo",
+        "fps": 60,
+        "overwrite": True,
+        "motion_json": [
+            {"time": 0, "poseData": [1.0] * 36},
+            {"time": 1, "poseData": [2.0] * 36},
+        ],
+    }
+    overwrite = client.post("/api/motions", json=overwrite_payload)
+    assert overwrite.status_code == 200
+    assert overwrite.json()["data"]["frames"] == 2
 
 
 def test_validate_accepts_motion_request():
@@ -217,3 +316,43 @@ def test_validate_rejects_unknown_motion():
     body = response.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "motion_not_found"
+
+
+def test_api_key_auth_controls_mutating_endpoints(monkeypatch):
+    monkeypatch.setenv("MOTION_API_KEY", "test-secret")
+
+    client = make_client()
+
+    unauthorized = client.post(
+        "/api/motions",
+        json={
+            "name": "x",
+            "motion_json": [{"time": 0, "poseData": [0.0] * 36}],
+        },
+    )
+    assert unauthorized.status_code == 401
+    assert unauthorized.json()["error"]["code"] == "unauthorized"
+
+    authorized = client.post(
+        "/api/motions",
+        json={
+            "name": "x",
+            "motion_json": [{"time": 0, "poseData": [0.0] * 36}],
+            "overwrite": True,
+        },
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert authorized.status_code == 200
+
+    unauthorized_validate = client.post(
+        "/api/replay/validate",
+        json={"motion": "wave", "dry_run": True},
+    )
+    assert unauthorized_validate.status_code == 401
+
+    authorized_validate = client.post(
+        "/api/replay/validate",
+        json={"motion": "wave", "dry_run": True},
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert authorized_validate.status_code == 200

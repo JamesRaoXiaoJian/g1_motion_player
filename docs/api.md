@@ -336,6 +336,84 @@ GET /api/motions/wave/json?fps=30
 
 ---
 
+### 6. `GET /api/motions/{motion}`
+
+获取单个动作的元数据（与 `GET /api/motions` 列表中的单项一致）。
+
+**响应示例：**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "name": "wave",
+    "csv_path": "assets/csv/wave.csv",
+    "frames": 600,
+    "duration_seconds": 10.0,
+    "columns": 36,
+    "controlled_joint_count": 17,
+    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
+  },
+  "error": null
+}
+```
+
+### 7. `POST /api/motions`
+
+创建一个动作。
+
+**请求体：**
+
+```json
+{
+  "name": "demo_payload",
+  "motion_json": [
+    {
+      "time": 0,
+      "poseData": [36个浮点数]
+    }
+  ],
+  "fps": 60,
+  "overwrite": false
+}
+```
+
+**响应示例：**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "motion": "demo_payload",
+    "motion_json_path": "assets/json/demo_payload.json",
+    "motion_csv_path": "assets/csv/demo_payload.csv",
+    "frames": 1,
+    "duration_seconds": 0.0166667,
+    "fps": 60,
+    "controlled_joint_count": 17,
+    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
+  },
+  "error": null
+}
+```
+
+当 `overwrite=false` 且同名动作已存在时，返回 `409 motion_exists`。
+
+创建动作会写入 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`，可立即通过
+`/api/motions/{motion}` 与 `/api/replay` 使用。
+
+## 认证说明
+
+如果设置环境变量 `MOTION_API_KEY`，则 `POST /api/replay`、`POST /api/replay/validate`、
+`POST /api/motions` 需要鉴权。支持以下方式之一：
+
+- `Authorization: Bearer <token>`
+- `X-API-Key: <token>`
+
+未配置 `MOTION_API_KEY` 时，接口不启用鉴权（兼容本地快速联调）。
+
+---
+
 ## 错误码
 
 | code | HTTP 状态码 | 说明 |
@@ -346,6 +424,8 @@ GET /api/motions/wave/json?fps=30
 | `invalid_csv` | 400 | CSV 格式错误（列数、数值等） |
 | `invalid_json` | 400 | JSON 帧数据格式错误 |
 | `replay_error` | 500 | csv_replay/json_replay 执行失败（二进制不存在或返回非零） |
+| `unauthorized` | 401 | API Key 缺失或无效 |
+| `motion_exists` | 409 | 新建动作已存在且 `overwrite=false` |
 
 ---
 
