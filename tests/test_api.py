@@ -134,6 +134,58 @@ def test_create_motion_with_overwrite(tmp_path: Path):
     assert overwrite.json()["data"]["frames"] == 2
 
 
+def test_update_motion_replaces_existing_payload(tmp_path: Path):
+    root = tmp_path
+    (root / "assets/csv").mkdir(parents=True, exist_ok=True)
+    (root / "assets/json").mkdir(parents=True, exist_ok=True)
+    client = make_client_for_root(root)
+
+    created = client.post(
+        "/api/motions",
+        json={
+            "name": "demo",
+            "motion_json": [{"time": 0, "poseData": [0.0] * 36}],
+            "fps": 60,
+        },
+    )
+    assert created.status_code == 200
+
+    updated = client.put(
+        "/api/motions/demo",
+        json={
+            "motion_json": [
+                {"time": 0, "poseData": [float(i) for i in range(36)]},
+                {"time": 1, "poseData": [float(i + 1) for i in range(36)]},
+            ],
+            "fps": 30,
+        },
+    )
+
+    assert updated.status_code == 200
+    data = updated.json()
+    assert data["data"]["motion"] == "demo"
+    assert data["data"]["frames"] == 2
+    assert data["data"]["duration_seconds"] == pytest.approx(2 / 30)
+
+    detail = client.get("/api/motions/demo").json()
+    assert detail["data"]["duration_seconds"] == pytest.approx(2 / 30)
+
+
+def test_update_motion_rejects_missing_motion(tmp_path: Path):
+    root = tmp_path
+    (root / "assets/csv").mkdir(parents=True, exist_ok=True)
+    (root / "assets/json").mkdir(parents=True, exist_ok=True)
+    client = make_client_for_root(root)
+
+    response = client.put(
+        "/api/motions/not_exists",
+        json={"motion_json": [{"time": 0, "poseData": [0.0] * 36}]},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "motion_not_found"
+
+
 def test_validate_accepts_motion_request():
     response = make_client().post(
         "/api/replay/validate",
@@ -356,3 +408,16 @@ def test_api_key_auth_controls_mutating_endpoints(monkeypatch):
         headers={"X-API-Key": "test-secret"},
     )
     assert authorized_validate.status_code == 200
+
+    unauthorized_update = client.put(
+        "/api/motions/wave",
+        json={"motion_json": [{"time": 0, "poseData": [0.0] * 36}]},
+    )
+    assert unauthorized_update.status_code == 401
+
+    authorized_update = client.put(
+        "/api/motions/wave",
+        json={"motion_json": [{"time": 0, "poseData": [0.0] * 36}]},
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert authorized_update.status_code == 200

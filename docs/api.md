@@ -402,10 +402,49 @@ GET /api/motions/wave/json?fps=30
 创建动作会写入 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`，可立即通过
 `/api/motions/{motion}` 与 `/api/replay` 使用。
 
+### 8. `PUT /api/motions/{motion}`
+
+更新已存在的动作。该接口会把传入 `motion_json` 全量覆盖到指定动作文件。
+
+**请求体：**
+
+```json
+{
+  "motion_json": [
+    {
+      "time": 0,
+      "poseData": [36个浮点数]
+    }
+  ],
+  "fps": 60
+}
+```
+
+**响应示例：**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "motion": "wave",
+    "motion_json_path": "assets/json/wave.json",
+    "motion_csv_path": "assets/csv/wave.csv",
+    "frames": 600,
+    "duration_seconds": 10.0,
+    "fps": 60,
+    "controlled_joint_count": 17,
+    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
+  },
+  "error": null
+}
+```
+
+当目标动作不存在时返回 `404 motion_not_found`。
+
 ## 认证说明
 
 如果设置环境变量 `MOTION_API_KEY`，则 `POST /api/replay`、`POST /api/replay/validate`、
-`POST /api/motions` 需要鉴权。支持以下方式之一：
+`POST /api/motions`、`PUT /api/motions/{motion}` 需要鉴权。支持以下方式之一：
 
 - `Authorization: Bearer <token>`
 - `X-API-Key: <token>`

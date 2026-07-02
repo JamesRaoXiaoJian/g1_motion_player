@@ -280,6 +280,8 @@ LAFAN1 retargeting 格式，每行 36 列（支持有表头/无表头）：
 
 - `POST /api/motions`（创建新动作，写入 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`）
 
+- `PUT /api/motions/{motion}`（更新已有动作）
+
 返回该 CSV 的 `[{id,time,poseData,jointValues}]` 调试 payload，用于前端发送/日志对比。
 
 测试资源（本地联调直接可用）：
@@ -290,7 +292,7 @@ JSON 数据用于 `/api/replay` 的 `motion_json` 入参。接口会把该 paylo
 `json_replay` 执行，并在本地异步保留一份 `assets/json/<name>.json` 与 `assets/csv/<name>.csv` 便于调试追踪。
 
 如果配置了环境变量 `MOTION_API_KEY`，则 `POST /api/replay`、`POST /api/replay/validate`
-和 `POST /api/motions` 需要携带鉴权头（`Authorization: Bearer <token>` 或
+、`POST /api/motions`、`PUT /api/motions/{motion}` 需要携带鉴权头（`Authorization: Bearer <token>` 或
 `X-API-Key: <token>`）。未配置则保持免鉴权，便于本地调试。
 
 ## 常见问题

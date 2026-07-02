@@ -60,6 +60,11 @@ class CreateMotionRequest(BaseModel):
     overwrite: bool = False
 
 
+class UpdateMotionRequest(BaseModel):
+    motion_json: list[MotionFramePayload]
+    fps: float = 60.0
+
+
 def success(data: Any, status_code: int = 200) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -376,6 +381,55 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                 409,
             )
 
+        _write_payload_artifacts(
+            json_path=json_path,
+            csv_path=csv_path,
+            frames=request_data.motion_json,
+        )
+
+        return success(
+            {
+                "motion": metadata.name,
+                "motion_json_path": str(json_path.relative_to(root)),
+                "motion_csv_path": str(csv_path.relative_to(root)),
+                "frames": metadata.frames,
+                "duration_seconds": metadata.duration_seconds,
+                "fps": request_data.fps,
+                "controlled_joint_count": metadata.controlled_joint_count,
+                "first_frame_arm_joints": metadata.first_frame_arm_joints,
+            }
+        )
+
+    @app.put("/api/motions/{motion}")
+    async def update_motion(
+        motion: str,
+        request_data: UpdateMotionRequest,
+        _api_key: None = Depends(_require_api_key),
+    ) -> JSONResponse:
+        if request_data.fps <= 0 or request_data.fps > 240:
+            raise ApiError(
+                "invalid_request",
+                "fps must be greater than 0 and less than or equal to 240.",
+                400,
+            )
+
+        name = _validate_motion_name(motion)
+        parse_motion_json_frames([frame.model_dump() for frame in request_data.motion_json])
+        metadata = load_motion_json(
+            [frame.model_dump() for frame in request_data.motion_json],
+            source_name=name,
+            fps=request_data.fps,
+        )
+
+        _, csv_path = _payload_paths(root, name)
+        if not csv_path.exists():
+            raise ApiError(
+                "motion_not_found",
+                f"motion '{name}' not found.",
+                404,
+            )
+
+        json_path = root / JSON_DIR / f"{name}.json"
         _write_payload_artifacts(
             json_path=json_path,
             csv_path=csv_path,
