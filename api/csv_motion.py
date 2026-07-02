@@ -342,7 +342,10 @@ def discover_motions(repo_root: Path) -> list[MotionMetadata]:
     assets_dir = repo_root / "assets"
     motions: list[MotionMetadata] = []
     for csv_path in sorted(assets_dir.glob("*.csv")):
-        motions.append(load_motion_csv(csv_path, repo_root=repo_root))
+        try:
+            motions.append(load_motion_csv(csv_path, repo_root=repo_root))
+        except CsvMotionError:
+            continue
     return motions
 
 

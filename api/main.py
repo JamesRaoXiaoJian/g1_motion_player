@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import csv
+import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +70,50 @@ def _status_for_csv_error(exc: CsvMotionError) -> int:
     if exc.code in {"invalid_request", "invalid_csv", "invalid_json"}:
         return 400
     return 400
+
+
+async def _run_csv_replay(
+    repo_root: Path,
+    csv_path: str,
+    fps: float,
+    net: str,
+) -> dict[str, Any]:
+    binary = repo_root / "build" / "csv_replay"
+    if not binary.exists():
+        raise ApiError(
+            "replay_error",
+            f"csv_replay binary not found at {binary}. Build the project first.",
+            500,
+        )
+
+    cmd = [str(binary), str(csv_path), str(int(fps)), net]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(repo_root),
+    )
+    stdout, stderr = await proc.communicate()
+    return {
+        "returncode": proc.returncode,
+        "stdout": stdout.decode(errors="replace").strip(),
+        "stderr": stderr.decode(errors="replace").strip(),
+    }
+
+
+def _json_to_temp_csv(frames: list[MotionFramePayload], repo_root: Path) -> Path:
+    tmp = tempfile.NamedTemporaryFile(
+        dir=str(repo_root / "assets"),
+        suffix=".csv",
+        delete=False,
+        mode="w",
+        newline="",
+    )
+    writer = csv.writer(tmp)
+    for frame in frames:
+        writer.writerow([f"{v:.10g}" for v in frame.poseData])
+    tmp.close()
+    return Path(tmp.name)
 
 
 def _validate_replay_request(
@@ -175,6 +223,39 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     @app.post("/api/replay/validate")
     async def validate_replay(request_data: ReplayRequest) -> JSONResponse:
         return success(_validate_replay_request(root, request_data))
+
+    @app.post("/api/replay")
+    async def replay(request_data: ReplayRequest) -> JSONResponse:
+        if request_data.dry_run:
+            return success(_validate_replay_request(root, request_data))
+
+        validated = _validate_replay_request(root, request_data)
+        tmp_csv: Path | None = None
+
+        try:
+            if validated["source_type"] == "motion_json":
+                tmp_csv = _json_to_temp_csv(request_data.motion_json, root)  # type: ignore[arg-type]
+                csv_file = str(tmp_csv.relative_to(root))
+            else:
+                csv_file = validated["csv_path"]
+
+            result = await _run_csv_replay(
+                repo_root=root,
+                csv_path=csv_file,
+                fps=validated["fps"],
+                net=validated["net"],
+            )
+            validated["replay"] = result
+            if result["returncode"] != 0:
+                raise ApiError(
+                    "replay_error",
+                    f"csv_replay exited with code {result['returncode']}: {result['stderr']}",
+                    500,
+                )
+            return success(validated)
+        finally:
+            if tmp_csv is not None:
+                tmp_csv.unlink(missing_ok=True)
 
     return app
 
