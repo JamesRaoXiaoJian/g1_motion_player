@@ -82,11 +82,17 @@ def _parse_motion_csv(path: Path) -> ParsedMotionCsv:
             if not row:
                 continue
             if len(row) != EXPECTED_COLUMNS:
-                continue
+                raise CsvMotionError(
+                    "invalid_csv",
+                    "CSV rows must contain exactly 36 columns.",
+                )
             try:
                 values = [float(cell) for cell in row]
-            except ValueError:
-                continue
+            except ValueError as exc:
+                raise CsvMotionError(
+                    "invalid_csv",
+                    "CSV rows must contain numeric values.",
+                ) from exc
             if not all(math.isfinite(value) for value in values):
                 raise CsvMotionError(
                     "invalid_csv",
@@ -188,7 +194,10 @@ def resolve_csv_path(repo_root: Path, motion: str | None, csv_path: str | None) 
             "csv_path must point to a CSV file inside the repository.",
         )
     if resolved.exists() and not resolved.is_file():
-        raise CsvMotionError("csv_not_found", f"CSV file does not exist: {csv_path}")
+        raise CsvMotionError(
+            "invalid_request",
+            "csv_path must point to a CSV file.",
+        )
     if resolved.suffix.lower() != ".csv":
         raise CsvMotionError(
             "invalid_request",
