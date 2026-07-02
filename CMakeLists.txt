@@ -33,10 +33,6 @@ add_subdirectory(thirdparty/unitree_sdk2)
 add_executable(csv_replay src/csv_replay.cpp)
 target_link_libraries(csv_replay unitree_sdk2)
 
-# json_replay: upper-body motion replay with JSON frame input
-add_executable(json_replay src/json_replay.cpp)
-target_link_libraries(json_replay unitree_sdk2)
-
 # test_connection: minimal connection test
 add_executable(test_connection src/test_connection.cpp)
 target_link_libraries(test_connection unitree_sdk2)

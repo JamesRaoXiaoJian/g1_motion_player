@@ -5,6 +5,7 @@ description = "Local HTTP API for G1 motion replay tools"
 requires-python = ">=3.9"
 dependencies = [
   "fastapi>=0.115,<1",
+  "python-multipart>=0.0.9,<1",
   "uvicorn[standard]>=0.30,<1"
 ]
 

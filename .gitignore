@@ -10,6 +10,8 @@ cmake_install.cmake
 
 # Python
 __pycache__/
+*.egg-info/
+.pytest_cache/
 
 # IDE
 .vscode/

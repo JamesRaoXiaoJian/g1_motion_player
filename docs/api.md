@@ -1,625 +1,181 @@
-# G1 Motion Player API 文档
+# G1 Motion Player API
 
-## 项目运作方式
+当前主分支只提供一个接口：
 
-### 整体架构
-
-```
-┌─────────────┐    HTTP     ┌──────────────┐    DDS (rt/arm_sdk)    ┌─────────────┐
-│   客户端     │ ──────────→ │   FastAPI     │ ────────────────────→ │   G1 机器人   │
-│  curl/前端   │ ←────────── │   :8000       │ ←──────────────────── │   (Unitree)  │
-└─────────────┘    JSON     └──────────────┘    rt/lowstate         └─────────────┘
-                                  │
-                                  │ spawn subprocess
-                                  ▼
-                           ┌────────────────────┐
-                           │ csv_replay         │
-                           │ json_replay        │
-                           │  (C++ binary)      │
-                           └────────────────────┘
+```text
+POST /api/replay
 ```
 
-### 执行流程
+接口从请求体接收 CSV 数据包，保存到 `assets/uploads/`，校验通过后按 `dry_run` 决定是否调用 `build/csv_replay`。
 
-1. **客户端** 发送 HTTP 请求到 FastAPI 服务
-2. **FastAPI** 解析请求，加载 CSV 或 JSON 动作数据，校验合法性
-3. **FastAPI** 调用编译好的 `csv_replay` 或 `json_replay` C++ 二进制（子进程）
-4. **csv_replay/json_replay** 通过宇树 SDK 的 DDS 通信（`rt/arm_sdk` 话题）下发关节角度给机器人
-5. 机器人执行动作，完成后子进程退出，API 返回结果
+旧版动作查询、创建、更新、JSON replay 接口已归档到远端分支 `api-json-replay-archive`。
+FastAPI 默认的 `/docs`、`/redoc`、`/openapi.json` 也已关闭，运行时只暴露 `POST /api/replay`。
 
-### 动作执行的五个阶段
+## 执行流程
 
-| 阶段 | 时长 | 说明 |
-|------|------|------|
-| BalanceStand + LowStand | 即时 | 切换平衡站立，降低重心 |
-| Engage | ~1s | weight 从 0→1，逐步接管上肢控制 |
-| Entry Select | 即时 | 在动作前 2 秒窗口内选择最接近当前姿态的入口帧 |
-| Transition | ~2s | 平滑过渡到入口帧（速度钳位 0.5 rad/s） |
-| Exit Select | 即时 | 在动作后 2 秒窗口内选择最接近初始姿态的退出帧 |
-| Replay | 取决于入口/退出帧和 fps | 从入口帧回放到退出帧（速度钳位 0.8 rad/s） |
-| Disengage | ~4s | 从退出帧回到初始姿态，weight 从 1→0 交还控制 |
+```text
+client
+  -> POST /api/replay
+  -> FastAPI 解析 CSV 上传或请求体
+  -> 写入 assets/uploads/.<name>.tmp
+  -> load_motion_csv 校验 36 列数值帧
+  -> 校验通过后替换为 assets/uploads/<name>.csv
+  -> dry_run=false 时调用 build/csv_replay
+  -> csv_replay 通过 rt/arm_sdk 下发动作
+```
 
-### 关节映射
+非法 CSV 只会留下错误响应，不会留下最终上传文件。
 
-CSV/JSON 包含 36 个值，程序只驱动上肢 **17 个关节**：
-
-| 索引范围 | 内容 | 是否驱动 |
-|----------|------|----------|
-| 0-6 | 根节点位置+四元数 | ❌ 忽略 |
-| 7-18 | 下肢 12 关节 | ❌ 内置运控控制 |
-| 19-21 | 腰部 3 DOF（yaw/roll/pitch） | ✅ SDK 12-14 |
-| 22-28 | 左臂 7 DOF | ✅ SDK 15-21 |
-| 29-35 | 右臂 7 DOF | ✅ SDK 22-28 |
-
----
-
-## 运行前提
-
-API 服务依赖 Python 包和 C++ 回放二进制：
+## 启动
 
 ```bash
-python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
+uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
 
+真实执行前必须先编译：
+
+```bash
 cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ```
 
-如果只做接口查询、动作创建或 `dry_run=true` 校验，可以暂时不连接机器人；如果要 `dry_run=false` 真实执行，需要：
+## 请求方式
 
-- `build/csv_replay` 和 `build/json_replay` 已编译存在。
-- `thirdparty/unitree_sdk2` 子模块完整。
-- 电脑与 G1 在同一有线网段。
-- 请求中的 `net` 字段等于实际网卡名。
+### multipart/form-data
 
-## 启动服务
+字段：
 
-```bash
-# 本机访问
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+| 字段 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `file` | file | 是 | - | CSV 文件 |
+| `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
+| `fps` | number | 否 | `60` | 回放帧率，范围 `(0, 240]` |
+| `net` | string | 否 | `eno0` | 机器人通信网卡 |
+| `dry_run` | bool | 否 | `true` | `true` 只校验，`false` 执行 |
 
-# 局域网访问
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
-
-# 后台运行，日志写入 api.log
-nohup python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
-```
-
-健康检查：
+示例：
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/api/replay \
+  -F "file=@assets/wave.csv" \
+  -F "save_as=wave_upload" \
+  -F "fps=60" \
+  -F "net=eno0" \
+  -F "dry_run=true"
 ```
 
-## 认证
+### application/json
 
-默认不启用认证，方便本地联调。
+字段：
 
-如果设置环境变量 `MOTION_API_KEY`，以下写操作需要鉴权：
+| 字段 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| `csv_data` | string | 是 | - | CSV 文件完整文本 |
+| `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
+| `fps` | number | 否 | `60` | 回放帧率 |
+| `net` | string | 否 | `eno0` | 机器人通信网卡 |
+| `dry_run` | bool | 否 | `true` | 是否只校验 |
 
-- `POST /api/replay`
-- `POST /api/replay/validate`
-- `POST /api/motions`
-- `PUT /api/motions/{motion}`
-
-启动前设置：
+示例：
 
 ```bash
-export MOTION_API_KEY="replace-with-a-long-random-token"
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+payload = {
+    "csv_data": Path("assets/wave.csv").read_text(encoding="utf-8"),
+    "save_as": "wave_json_body",
+    "fps": 60,
+    "net": "eno0",
+    "dry_run": True,
+}
+Path("/tmp/replay.json").write_text(json.dumps(payload), encoding="utf-8")
+PY
+
+curl -X POST http://127.0.0.1:8000/api/replay \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/replay.json
 ```
 
-请求时二选一：
+### text/csv
+
+参数放在 query string：
 
 ```bash
-curl -H "X-API-Key: replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
-curl -H "Authorization: Bearer replace-with-a-long-random-token" http://127.0.0.1:8000/api/motions
+curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=60&net=eno0&dry_run=true" \
+  -H "Content-Type: text/csv" \
+  --data-binary @assets/wave.csv
 ```
 
----
+## 响应
 
-## 统一响应格式
-
-**成功：**
+成功：
 
 ```json
 {
   "ok": true,
-  "data": { ... },
+  "data": {
+    "name": "wave_upload",
+    "csv_path": "assets/uploads/wave_upload.csv",
+    "frames": 600,
+    "duration_seconds": 10.0,
+    "columns": 36,
+    "controlled_joint_count": 17,
+    "first_frame_arm_joints": [0.0868397],
+    "source_type": "uploaded_csv",
+    "fps": 60,
+    "net": "eno0",
+    "dry_run": true
+  },
   "error": null
 }
 ```
 
-**失败：**
+`dry_run=false` 且执行成功时，`data` 会多出：
+
+```json
+{
+  "replay": {
+    "returncode": 0,
+    "stdout": "...",
+    "stderr": ""
+  }
+}
+```
+
+失败：
 
 ```json
 {
   "ok": false,
   "data": null,
   "error": {
-    "code": "invalid_request",
-    "message": "错误描述"
+    "code": "invalid_csv",
+    "message": "CSV rows must contain exactly 36 columns."
   }
 }
 ```
 
----
-
-## 接口列表
-
-### 1. `GET /health`
-
-健康检查。
-
-**请求参数：** 无
-
-**响应：**
-
-```json
-{
-  "ok": true,
-  "data": { "status": "ok" },
-  "error": null
-}
-```
-
----
-
-### 2. `GET /api/motions`
-
-列出 `assets/csv/` 目录下所有合法的动作 CSV 文件。
-
-**请求参数：** 无
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motions": [
-      {
-        "name": "wave",
-        "csv_path": "assets/csv/wave.csv",
-        "frames": 600,
-        "duration_seconds": 10.0,
-        "columns": 36,
-        "controlled_joint_count": 17,
-        "first_frame_arm_joints": [
-          0.0868397, 0.12404, 0.239799, 1.39578, 0.3531, 0.135927,
-          -0.116623, 0.0378742, -0.13948, -0.239799, 1.41144, -0.424301,
-          0.0711032, 0.196331, -0.0231218, -0.0155658, -0.0174935
-        ]
-      }
-    ]
-  },
-  "error": null
-}
-```
-
-**字段说明：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `name` | string | 动作名（文件名去掉 `.csv`） |
-| `csv_path` | string | 相对于项目根目录的路径 |
-| `frames` | int | 总帧数 |
-| `duration_seconds` | float | 时长（秒），按 60fps 计算 |
-| `columns` | int | 列数，固定 36 |
-| `controlled_joint_count` | int | 实际驱动关节数，固定 17 |
-| `first_frame_arm_joints` | float[17] | 首帧上肢 17 关节角度（弧度） |
-
----
-
-### 3. `GET /api/motions/{motion}/json`
-
-获取指定动作的完整帧数据（JSON 格式）。
-
-**路径参数：**
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `motion` | string | 动作名，如 `wave`、`zuoyi` |
-
-**查询参数：**
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `fps` | float | 60.0 | 帧率，必须 > 0 |
-
-**请求示例：**
-
-```
-GET /api/motions/wave/json?fps=30
-```
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motion": "wave",
-    "fps": 30.0,
-    "duration_seconds": 20.0,
-    "frame_count": 600,
-    "frames": [
-      {
-        "id": 0,
-        "time": 0.0,
-        "poseData": [0.0303281, 0.00633653, 0.793114, ...],
-        "jointValues": {
-          "left_shoulder_pitch_joint": 4.975,
-          "left_shoulder_roll_joint": 7.107,
-          "waist_yaw_joint": -1.325,
-          ...
-        }
-      }
-    ]
-  },
-  "error": null
-}
-```
-
-**frame 字段说明：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | int | 帧序号（从 0 开始） |
-| `time` | float | 时间戳（秒） |
-| `poseData` | float[36] | 36 个关节值（**弧度**），与 CSV 一一对应 |
-| `jointValues` | object | 29 个关节名→角度（**度**），仅 SDK 控制的 29 关节 |
-
----
-
-### 4. `POST /api/replay/validate`
-
-验证回放请求的合法性，不执行动作。请求体与 `/api/replay` 完全相同（见下方）。
-
-如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motion": "wave",
-    "csv_path": "assets/csv/wave.csv",
-    "fps": 60.0,
-    "net": "eno0",
-    "dry_run": true,
-    "source_type": "motion_csv",
-    "frames": 600,
-    "duration_seconds": 10.0,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397, ...]
-  },
-  "error": null
-}
-```
-
----
-
-### 5. `POST /api/replay`
-
-执行动作回放。核心接口。
-
-如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
-
-**请求体（JSON）：**
-
-```json
-{
-  "motion": "wave",
-  "fps": 60.0,
-  "net": "eno0",
-  "dry_run": false
-}
-```
-
-**请求字段：**
-
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `motion` | string \| null | 三选一 | null | 动作名（如 `wave`），对应 `assets/csv/{name}.csv` |
-| `csv_path` | string \| null | 三选一 | null | CSV 文件相对路径（如 `assets/csv/wave.csv`） |
-| `motion_json` | array \| null | 三选一 | null | JSON 帧数据数组（见下方格式） |
-| `fps` | float | 否 | 60.0 | 回放帧率，范围 (0, 240] |
-| `net` | string | 否 | "eno0" | DDS 网卡名 |
-| `dry_run` | bool | 否 | true | `true`=仅验证，`false`=真正执行 |
-
-> **三选一**：`motion`、`csv_path`、`motion_json` 必须且只能提供一个。
-
-**motion_json 帧格式：**
-
-```json
-{
-  "motion_json": [
-    {
-      "poseData": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ...],
-      "jointValues": {
-        "left_shoulder_pitch_joint": 4.975,
-        "right_shoulder_pitch_joint": 2.170
-      }
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `poseData` | float[36] | ✅ | 36 个关节值（弧度），与 CSV 行对应 |
-| `jointValues` | object | 否 | 关节名→角度（度），若提供则必须与 poseData[7:36] 一致 |
-
-**成功响应（dry_run=false）：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motion": "wave",
-    "csv_path": "assets/csv/wave.csv",
-    "fps": 60.0,
-    "net": "eno0",
-    "dry_run": false,
-    "source_type": "motion_csv",
-    "frames": 600,
-    "duration_seconds": 10.0,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397, ...],
-    "replay": {
-      "returncode": 0,
-      "stdout": "Loaded 600 frames (10s)\nConnecting via eno0...\n...\nDone: 600 frames in 10.054s",
-      "stderr": ""
-    }
-  },
-  "error": null
-}
-```
-
-**replay 字段说明：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `returncode` | int | 进程退出码，0=成功 |
-| `stdout` | string | csv_replay 或 json_replay 的标准输出（含完整执行日志） |
-| `stderr` | string | 标准错误输出 |
-
-当 `source_type` 为 `motion_json` 时，响应还会带上：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `debug_json_path` | string | 写入的 JSON 调试文件（如 `assets/json/<name>.json`） |
-| `debug_csv_path` | string | 写入的 CSV 调试文件（如 `assets/csv/<name>.csv`） |
-
----
-
-### 6. `GET /api/motions/{motion}`
-
-获取单个动作的元数据（与 `GET /api/motions` 列表中的单项一致）。
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "name": "wave",
-    "csv_path": "assets/csv/wave.csv",
-    "frames": 600,
-    "duration_seconds": 10.0,
-    "columns": 36,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
-  },
-  "error": null
-}
-```
-
-### 7. `POST /api/motions`
-
-创建一个动作。
-
-如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
-
-**请求体：**
-
-```json
-{
-  "name": "demo_payload",
-  "motion_json": [
-    {
-      "time": 0,
-      "poseData": [36个浮点数]
-    }
-  ],
-  "fps": 60,
-  "overwrite": false
-}
-```
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motion": "demo_payload",
-    "motion_json_path": "assets/json/demo_payload.json",
-    "motion_csv_path": "assets/csv/demo_payload.csv",
-    "frames": 1,
-    "duration_seconds": 0.0166667,
-    "fps": 60,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
-  },
-  "error": null
-}
-```
-
-当 `overwrite=false` 且同名动作已存在时，返回 `409 motion_exists`。
-
-创建动作会写入 `assets/json/<name>.json` 与 `assets/csv/<name>.csv`，可立即通过
-`/api/motions/{motion}` 与 `/api/replay` 使用。
-
-### 8. `PUT /api/motions/{motion}`
-
-更新已存在的动作。该接口会把传入 `motion_json` 全量覆盖到指定动作文件。
-
-如果设置了 `MOTION_API_KEY`，该接口需要鉴权。
-
-**请求体：**
-
-```json
-{
-  "motion_json": [
-    {
-      "time": 0,
-      "poseData": [36个浮点数]
-    }
-  ],
-  "fps": 60
-}
-```
-
-**响应示例：**
-
-```json
-{
-  "ok": true,
-  "data": {
-    "motion": "wave",
-    "motion_json_path": "assets/json/wave.json",
-    "motion_csv_path": "assets/csv/wave.csv",
-    "frames": 600,
-    "duration_seconds": 10.0,
-    "fps": 60,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397, 0.12404, ...]
-  },
-  "error": null
-}
-```
-
-当目标动作不存在时返回 `404 motion_not_found`。
-
 ## 错误码
 
-| code | HTTP 状态码 | 说明 |
-|------|-------------|------|
-| `invalid_request` | 400 | 参数错误（缺少源、fps 超范围、多个源等） |
-| `motion_not_found` | 404 | 动作名不存在 |
-| `csv_not_found` | 404 | CSV 文件不存在 |
-| `invalid_csv` | 400 | CSV 格式错误（列数、数值等） |
-| `invalid_json` | 400 | JSON 帧数据格式错误 |
-| `replay_error` | 500 | csv_replay/json_replay 执行失败（二进制不存在或返回非零） |
-| `unauthorized` | 401 | API Key 缺失或无效 |
-| `motion_exists` | 409 | 新建动作已存在且 `overwrite=false` |
+| code | HTTP | 说明 |
+|------|------|------|
+| `invalid_request` | 400 / 413 | 请求格式、参数、大小或 `save_as` 非法 |
+| `invalid_csv` | 400 | CSV 不是 UTF-8、列数不对、非数值或非有限数 |
+| `csv_not_found` | 404 | 内部 CSV 路径不存在 |
+| `replay_error` | 500 | `csv_replay` 不存在或执行返回非 0 |
 
----
+## CSV 规则
 
-## 请求示例
+- UTF-8 文本。
+- 每个有效行必须 36 列。
+- 所有值必须能解析为有限浮点数。
+- 空行会跳过。
+- 标准 36 列表头会跳过。
+- 最大请求体大小为 10 MiB。
 
-```bash
-BASE=http://127.0.0.1:8000
-API_KEY=replace-with-a-long-random-token
+## 安全说明
 
-# 健康检查
-curl "$BASE/health"
-
-# 列出所有动作
-curl "$BASE/api/motions"
-
-# 获取单个动作元数据
-curl "$BASE/api/motions/wave"
-
-# 获取动作 JSON 帧
-curl "$BASE/api/motions/wave/json?fps=30"
-```
-
-如果启用了 `MOTION_API_KEY`，写接口需要加鉴权头；如果未启用，删除 `-H "X-API-Key: $API_KEY"` 即可。
-
-创建动作：
-
-```bash
-python3 - <<'PY' >/tmp/create_motion.json
-import json
-import sys
-json.dump({
-    "name": "demo",
-    "fps": 60,
-    "motion_json": [
-        {"time": 0, "poseData": [0.0] * 36}
-    ],
-}, sys.stdout)
-PY
-
-curl -X POST "$BASE/api/motions" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  --data-binary @/tmp/create_motion.json
-```
-
-更新动作：
-
-```bash
-python3 - <<'PY' >/tmp/update_motion.json
-import json
-import sys
-json.dump({
-    "fps": 60,
-    "motion_json": [
-        {"time": 0, "poseData": [0.0] * 36},
-        {"time": 1 / 60, "poseData": [0.01] * 36},
-    ],
-}, sys.stdout)
-PY
-
-curl -X PUT "$BASE/api/motions/demo" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  --data-binary @/tmp/update_motion.json
-```
-
-校验动作回放：
-
-```bash
-curl -X POST "$BASE/api/replay/validate" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": true}'
-```
-
-执行已有 CSV 动作：
-
-```bash
-curl -X POST "$BASE/api/replay" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"motion": "wave", "fps": 60, "net": "eno0", "dry_run": false}'
-```
-
-执行 JSON payload：
-
-```bash
-python3 - <<'PY' >/tmp/replay_json.json
-import json
-import sys
-json.dump({
-    "motion_json": [
-        {"time": 0, "poseData": [0.0] * 36}
-    ],
-    "fps": 60,
-    "net": "eno0",
-    "dry_run": False,
-}, sys.stdout)
-PY
-
-curl -X POST "$BASE/api/replay" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  --data-binary @/tmp/replay_json.json
-```
+主分支当前没有内置认证，适合 PC2 本机或可信内网联调。绑定 `0.0.0.0` 前建议使用防火墙限制来源 IP，或在 Nginx/Caddy 等反向代理层加认证。
