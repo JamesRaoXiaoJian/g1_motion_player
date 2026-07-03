@@ -1,12 +1,26 @@
 # G1 Motion Player
 
-Unitree G1 动作回放工具。当前主分支只保留 CSV 执行链路：
+<p align="center">
+  <a href="README.md">中文</a> · <a href="README_EN.md">English</a>
+</p>
+
+Unitree G1 动作回放工具，用于把 CSV 关节动作安全地发送到 G1 上肢 `rt/arm_sdk` 控制链路。项目包含 C++ 实时执行程序、FastAPI 本地 HTTP 接口、CSV 校验逻辑、连接测试和示例动作，适合在 G1 PC2 或同一有线网段的 Ubuntu 机器上部署。
+
+当前主分支只保留 CSV 执行链路：
 
 - C++ 执行层：`csv_replay` 读取 CSV，通过 Unitree SDK DDS 话题 `rt/arm_sdk` 下发动作。
 - HTTP 接口层：FastAPI 只提供 `POST /api/replay`，从请求体接收 CSV 数据包，校验后保存并按需调用 `csv_replay`。
 - 示例动作：`assets/wave.csv`、`assets/zuoyi.csv`。
 
 之前的动作查询、创建、更新、JSON replay 版本已归档到远端分支 `api-json-replay-archive`。主分支不再存放 JSON 动作数据，也不再构建 `json_replay`。
+
+## 功能亮点
+
+- CSV 动作校验、保存和执行，默认 `dry_run=true` 防止误触发真实机器人。
+- C++ `csv_replay` 使用 Unitree SDK DDS 直接向 `rt/arm_sdk` 下发动作。
+- FastAPI 仅暴露 `POST /api/replay`，默认关闭 `/docs`、`/redoc`、`/openapi.json`。
+- nearest-window 入口/退出选择和速度钳位，降低动作首尾姿态差异导致的冲击。
+- 附带 `state_recorder`、`test_connection` 和 API/CSV 单元测试。
 
 ## 执行策略
 
