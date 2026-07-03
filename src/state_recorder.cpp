@@ -4,12 +4,13 @@
 // Output: CSV in same 36-column format as input keyframes, with header.
 //
 // Usage: ./state_recorder <csv> [fps] [net]
-//        default: 60fps, eno0
+//        default: 50fps, eno0
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -56,6 +57,7 @@ static constexpr float kLegKd = 1.0f;
 static constexpr float kTransitionMaxVel = 0.5f;
 static constexpr float kReplayMaxVel = 0.8f;
 static constexpr float kFinalWeightTarget = 1.0f;
+static constexpr float kDefaultFps = 50.0f;
 
 struct CsvFrame {
     std::array<float, 29> joints;
@@ -100,7 +102,7 @@ int main(int argc, char const* argv[]) {
     }
 
     std::string csv_path = argv[1];
-    float fps = 60.0f;
+    float fps = kDefaultFps;
     std::string net = "eno0";
     if (argc >= 3) {
         try { fps = std::stof(argv[2]); } catch (...) { net = argv[2]; }

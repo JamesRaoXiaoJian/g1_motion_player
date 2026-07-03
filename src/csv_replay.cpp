@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -80,6 +81,7 @@ static constexpr float kAnkleKd = 1.0f;
 static constexpr float kTransitionMaxVel = 0.5f;  // rad/s
 static constexpr float kReplayMaxVel = 0.8f;      // rad/s，Replay阶段稍快
 static constexpr float kNearestWindowSeconds = 2.0f;
+static constexpr float kDefaultFps = 50.0f;
 
 // weight=1.0，与官方 g1_arm7_sdk_dds_example 一致
 static constexpr float kFinalWeightTarget = 1.0f;
@@ -88,7 +90,7 @@ struct CsvFrame {
     std::array<float, 29> joints;
 };
 
-std::vector<CsvFrame> LoadCsv(const std::string& path) {
+std::vector<CsvFrame> LoadCsv(const std::string& path, float fps) {
     std::vector<CsvFrame> frames;
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -110,7 +112,7 @@ std::vector<CsvFrame> LoadCsv(const std::string& path) {
         frames.push_back(f);
     }
     std::cout << "Loaded " << frames.size() << " frames ("
-              << frames.size() / 60.0f << "s)" << std::endl;
+              << frames.size() / fps << "s @ " << fps << "fps)" << std::endl;
     return frames;
 }
 
@@ -128,7 +130,7 @@ int main(int argc, char const* argv[]) {
 
     std::string net = "eno0";
     std::string csv_path;
-    float fps = 60.0f;
+    float fps = kDefaultFps;
 
     // New mode: <csv> [fps] [net]
     if (is_csv_path(argv[1])) {
@@ -156,7 +158,7 @@ int main(int argc, char const* argv[]) {
         }
     }
 
-    auto frames = LoadCsv(csv_path);
+    auto frames = LoadCsv(csv_path, fps);
     if (frames.empty()) return 1;
 
     // DDS init
@@ -399,7 +401,7 @@ int main(int argc, char const* argv[]) {
         send(cmd_pos);
 
         std::size_t replay_index = fi - entry_frame;
-        if (replay_index % 60 == 0) {
+        if (replay_index % std::max<std::size_t>(1, static_cast<std::size_t>(std::round(fps))) == 0) {
             float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
             std::cout << "  " << replay_index << "/" << planned_frames
                       << " source_frame=" << fi

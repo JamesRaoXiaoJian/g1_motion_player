@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <fstream>
 #include <iomanip>
@@ -62,6 +63,7 @@ static constexpr float kKd = 1.5f;
 // Velocity limits
 static constexpr float kTransitionMaxVel = 0.5f;
 static constexpr float kReplayMaxVel = 0.8f;
+static constexpr float kDefaultFps = 50.0f;
 
 static std::atomic<bool> g_running{true};
 
@@ -71,7 +73,7 @@ struct CsvFrame {
     std::array<float, 29> joints;
 };
 
-std::vector<CsvFrame> LoadCsv(const std::string& path) {
+std::vector<CsvFrame> LoadCsv(const std::string& path, float fps) {
     std::vector<CsvFrame> frames;
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -93,7 +95,7 @@ std::vector<CsvFrame> LoadCsv(const std::string& path) {
         frames.push_back(f);
     }
     std::cout << "Loaded " << frames.size() << " frames ("
-              << frames.size() / 60.0f << "s)" << std::endl;
+              << frames.size() / fps << "s @ " << fps << "fps)" << std::endl;
     return frames;
 }
 
@@ -115,7 +117,7 @@ int main(int argc, char const* argv[]) {
 
     std::string net = "eno0";
     std::string csv_path;
-    float fps = 60.0f;
+    float fps = kDefaultFps;
 
     if (is_csv_path(argv[1])) {
         csv_path = argv[1];
@@ -139,7 +141,7 @@ int main(int argc, char const* argv[]) {
         }
     }
 
-    auto frames = LoadCsv(csv_path);
+    auto frames = LoadCsv(csv_path, fps);
     if (frames.empty()) return 1;
 
     std::signal(SIGINT, SignalHandler);
@@ -296,7 +298,7 @@ int main(int argc, char const* argv[]) {
             }
             send(cmd_pos);
 
-            if (fi % 60 == 0) {
+            if (fi % std::max<int>(1, static_cast<int>(std::round(fps))) == 0) {
                 float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
                 std::cout << "  " << fi << "/" << frames.size() << " t=" << std::fixed << std::setprecision(1) << t << "s" << std::endl;
             }

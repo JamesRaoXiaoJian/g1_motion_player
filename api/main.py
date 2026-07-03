@@ -16,6 +16,7 @@ from .csv_motion import ASSETS_DIR, CsvMotionError, MotionMetadata, load_motion_
 
 
 MAX_CSV_BYTES = 10 * 1024 * 1024
+DEFAULT_REPLAY_FPS = 50.0
 UPLOAD_DIR = ASSETS_DIR / "uploads"
 
 
@@ -247,7 +248,7 @@ async def _parse_json_body_replay_request(request: Request) -> ReplayInput:
     if not isinstance(csv_text, str):
         raise ApiError("invalid_request", "JSON body must include csv_data as a string.", 400)
 
-    fps = _validate_fps(_parse_float(_json_value(payload, "fps"), "fps", 60.0))
+    fps = _validate_fps(_parse_float(_json_value(payload, "fps"), "fps", DEFAULT_REPLAY_FPS))
     return ReplayInput(
         csv_text=_validate_csv_text(csv_text),
         save_as=_json_value(payload, "save_as"),
@@ -284,7 +285,7 @@ async def _parse_multipart_replay_request(request: Request) -> ReplayInput:
             )
         csv_text = csv_data
 
-    fps = _validate_fps(_parse_float(form.get("fps"), "fps", 60.0))
+    fps = _validate_fps(_parse_float(form.get("fps"), "fps", DEFAULT_REPLAY_FPS))
     save_as = form.get("save_as")
     return ReplayInput(
         csv_text=_validate_csv_text(csv_text),
@@ -300,7 +301,7 @@ async def _parse_raw_csv_replay_request(request: Request) -> ReplayInput:
     raw = await request.body()
     csv_text = _decode_csv_bytes(raw)
     query = request.query_params
-    fps = _validate_fps(_parse_float(query.get("fps"), "fps", 60.0))
+    fps = _validate_fps(_parse_float(query.get("fps"), "fps", DEFAULT_REPLAY_FPS))
     return ReplayInput(
         csv_text=_validate_csv_text(csv_text),
         save_as=query.get("save_as"),

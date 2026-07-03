@@ -5,7 +5,7 @@ keyframe CSV, based on recorded telemetry from full motion playback sessions.
 
 ## Data Sources
 
-| File | Rows | Duration (60fps) | Description |
+| File | Rows | Duration in original 60fps analysis | Description |
 |------|------|-------------------|-------------|
 | `zuoyi_recorded.csv` | 1259 | 21.0s | Full playback recording (zuoyi sitting motion) |
 | `wave_recorded.csv` | 1259 | 21.0s | Full playback recording (wave motion) |
@@ -14,6 +14,9 @@ keyframe CSV, based on recorded telemetry from full motion playback sessions.
 
 Each recording spans ~21s: Engage (1s) + Transition (2s) + Replay (10s) + Disengage (4s)
 + remaining frames.
+
+Current replay defaults to 50Hz for G1 `rt/arm_sdk` stability. The same 600 keyframes
+therefore play in 12.0s unless `fps=60` is explicitly passed.
 
 ## Important: CSV Column Mapping
 

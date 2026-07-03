@@ -21,7 +21,7 @@ def test_load_motion_csv_returns_metadata_for_asset_wave():
     assert metadata.frames == 600
     assert metadata.columns == 36
     assert metadata.controlled_joint_count == 17
-    assert metadata.duration_seconds == pytest.approx(600 / 60.0)
+    assert metadata.duration_seconds == pytest.approx(600 / 50.0)
     assert metadata.first_frame_arm_joints[:2] == pytest.approx([0.0868397, 0.12404])
 
 

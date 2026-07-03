@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 EXPECTED_COLUMNS = 36
-DEFAULT_METADATA_FPS = 60.0
+DEFAULT_METADATA_FPS = 50.0
 ASSETS_DIR = Path("assets")
 CSV_HEADER = (
     "root_pos_x",

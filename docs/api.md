@@ -50,7 +50,7 @@ cmake --build build -j"$(nproc)"
 |------|------|------|------|------|
 | `file` | file | 是 | - | CSV 文件 |
 | `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
-| `fps` | number | 否 | `60` | 回放帧率，范围 `(0, 240]` |
+| `fps` | number | 否 | `50` | 回放帧率，范围 `(0, 240]` |
 | `net` | string | 否 | `eno0` | 机器人通信网卡 |
 | `dry_run` | bool | 否 | `true` | `true` 只校验，`false` 执行 |
 
@@ -60,7 +60,7 @@ cmake --build build -j"$(nproc)"
 curl -X POST http://127.0.0.1:8000/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=wave_upload" \
-  -F "fps=60" \
+  -F "fps=50" \
   -F "net=eno0" \
   -F "dry_run=true"
 ```
@@ -73,7 +73,7 @@ curl -X POST http://127.0.0.1:8000/api/replay \
 |------|------|------|------|------|
 | `csv_data` | string | 是 | - | CSV 文件完整文本 |
 | `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
-| `fps` | number | 否 | `60` | 回放帧率 |
+| `fps` | number | 否 | `50` | 回放帧率 |
 | `net` | string | 否 | `eno0` | 机器人通信网卡 |
 | `dry_run` | bool | 否 | `true` | 是否只校验 |
 
@@ -87,7 +87,7 @@ from pathlib import Path
 payload = {
     "csv_data": Path("assets/wave.csv").read_text(encoding="utf-8"),
     "save_as": "wave_json_body",
-    "fps": 60,
+    "fps": 50,
     "net": "eno0",
     "dry_run": True,
 }
@@ -104,7 +104,7 @@ curl -X POST http://127.0.0.1:8000/api/replay \
 参数放在 query string：
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=60&net=eno0&dry_run=true" \
+curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=50&net=eno0&dry_run=true" \
   -H "Content-Type: text/csv" \
   --data-binary @assets/wave.csv
 ```
@@ -120,12 +120,12 @@ curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=60&net=eno0&
     "name": "wave_upload",
     "csv_path": "assets/uploads/wave_upload.csv",
     "frames": 600,
-    "duration_seconds": 10.0,
+    "duration_seconds": 12.0,
     "columns": 36,
     "controlled_joint_count": 17,
     "first_frame_arm_joints": [0.0868397],
     "source_type": "uploaded_csv",
-    "fps": 60,
+    "fps": 50,
     "net": "eno0",
     "dry_run": true
   },
@@ -134,6 +134,8 @@ curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=60&net=eno0&
 ```
 
 `dry_run=false` 且执行成功时，`data` 会多出：
+
+默认 `fps=50`。如果动作数据需要保持 60fps 原始时间尺度，可在请求中显式传 `fps=60`。
 
 ```json
 {

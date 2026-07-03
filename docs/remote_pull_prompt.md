@@ -49,7 +49,7 @@ uvicorn api.main:app --host 127.0.0.1 --port 8000
 curl -X POST http://127.0.0.1:8000/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=pc2_pull_check" \
-  -F "fps=60" \
+  -F "fps=50" \
   -F "net=eno0" \
   -F "dry_run=true"
 
@@ -80,4 +80,3 @@ from api.main import create_app
 print([(route.path, sorted(route.methods)) for route in create_app().routes])
 PY
 ```
-

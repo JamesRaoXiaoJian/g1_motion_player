@@ -105,7 +105,7 @@ cmake --build build -j"$(nproc)" --target test_connection
 不经过 API 时，直接调用：
 
 ```bash
-./build/csv_replay assets/wave.csv 60 eno0
+./build/csv_replay assets/wave.csv 50 eno0
 ```
 
 命令格式：
@@ -118,9 +118,11 @@ cmake --build build -j"$(nproc)" --target test_connection
 
 ```bash
 ./build/csv_replay assets/wave.csv
-./build/csv_replay assets/wave.csv 60 eno0
+./build/csv_replay assets/wave.csv 50 eno0
 ./build/csv_replay assets/zuoyi.csv 50 eno0
 ```
+
+默认回放频率为 50Hz。若要保持 600 帧动作按 10 秒播放，可以显式传 `60`。
 
 ## 8. 启动 API
 
@@ -147,7 +149,7 @@ multipart 上传 CSV，只校验不执行：
 curl -X POST http://127.0.0.1:8000/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=wave_pc2_check" \
-  -F "fps=60" \
+  -F "fps=50" \
   -F "net=eno0" \
   -F "dry_run=true"
 ```
@@ -175,7 +177,7 @@ assets/uploads/wave_pc2_check.csv
 curl -X POST http://127.0.0.1:8000/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=wave_pc2_run" \
-  -F "fps=60" \
+  -F "fps=50" \
   -F "net=eno0" \
   -F "dry_run=false"
 ```
@@ -272,4 +274,3 @@ CSV 必须满足：
 - 每个有效行 36 列。
 - 所有值是有限数字。
 - 请求体不超过 10 MiB。
-

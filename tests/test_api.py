@@ -32,7 +32,7 @@ def test_replay_accepts_json_body_csv_data_and_saves_upload(tmp_path: Path):
         json={
             "csv_data": _sample_csv_text(),
             "save_as": "json_upload",
-            "fps": 50,
+            "fps": 60,
             "net": "eth0",
             "dry_run": True,
         },
@@ -44,7 +44,8 @@ def test_replay_accepts_json_body_csv_data_and_saves_upload(tmp_path: Path):
     assert body["error"] is None
     assert body["data"]["source_type"] == "uploaded_csv"
     assert body["data"]["csv_path"] == "assets/uploads/json_upload.csv"
-    assert body["data"]["fps"] == 50
+    assert body["data"]["fps"] == 60
+    assert body["data"]["duration_seconds"] == 10.0
     assert body["data"]["net"] == "eth0"
     assert body["data"]["dry_run"] is True
     assert body["data"]["frames"] == 600
@@ -60,13 +61,15 @@ def test_replay_accepts_multipart_csv_upload(tmp_path: Path):
         response = client.post(
             "/api/replay",
             files={"file": ("wave.csv", handle, "text/csv")},
-            data={"save_as": "multipart_upload", "fps": "60", "net": "eno0", "dry_run": "true"},
+            data={"save_as": "multipart_upload", "net": "eno0", "dry_run": "true"},
         )
 
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
     assert body["data"]["csv_path"] == "assets/uploads/multipart_upload.csv"
+    assert body["data"]["fps"] == 50
+    assert body["data"]["duration_seconds"] == 12.0
     assert body["data"]["frames"] == 600
     assert (tmp_path / "assets" / "uploads" / "multipart_upload.csv").exists()
 
@@ -83,7 +86,7 @@ def test_replay_dry_run_false_calls_csv_replay(monkeypatch, tmp_path: Path):
     ) -> dict[str, int | str]:
         assert repo_root == tmp_path.resolve()
         assert csv_path == "assets/uploads/run_upload.csv"
-        assert fps == 60
+        assert fps == 50
         assert net == "eno0"
         return {"returncode": 0, "stdout": "started", "stderr": ""}
 
@@ -94,7 +97,6 @@ def test_replay_dry_run_false_calls_csv_replay(monkeypatch, tmp_path: Path):
         json={
             "csv_data": _sample_csv_text(),
             "save_as": "run_upload",
-            "fps": 60,
             "net": "eno0",
             "dry_run": False,
         },
