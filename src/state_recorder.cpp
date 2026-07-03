@@ -4,7 +4,7 @@
 // Output: CSV in same 36-column format as input keyframes, with header.
 //
 // Usage: ./state_recorder <csv> [fps] [net]
-//        default: 50fps, eno0
+//        default: 50fps, eth0
 
 #include <algorithm>
 #include <array>
@@ -103,7 +103,7 @@ int main(int argc, char const* argv[]) {
 
     std::string csv_path = argv[1];
     float fps = kDefaultFps;
-    std::string net = "eno0";
+    std::string net = "eth0";
     if (argc >= 3) {
         try { fps = std::stof(argv[2]); } catch (...) { net = argv[2]; }
     }

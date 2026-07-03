@@ -43,17 +43,16 @@ for route in create_app().routes:
 PY
 
 # 启动 API，若已有服务在运行，先汇报，不要强杀未知进程
-uvicorn api.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8001
 
 # 另开终端 dry-run 验证
-curl -X POST http://127.0.0.1:8000/api/replay \
+curl -X POST http://127.0.0.1:8001/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=pc2_pull_check" \
   -F "fps=50" \
-  -F "net=eno0" \
   -F "dry_run=true"
 
-如果 PC2 的机器人通信网卡不是 eno0，把上面的 net=eno0 改成实际网卡名。
+仓库默认机器人通信网卡是 eth0；API 不接收 net 参数。如果 PC2 的机器人通信网卡不是 eth0，先修改 api/main.py 的 DEFAULT_ROBOT_NET 和 C++ 工具默认网卡，重新编译后再启动 API。
 完成后汇报：当前 commit、git status、csv_replay 编译结果、API 路由检查结果、dry-run curl 返回。
 ```
 

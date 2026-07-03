@@ -5,7 +5,7 @@
 //
 // Usage: ./csv_replay_debug <csv> [fps] [net]
 //        ./csv_replay_debug <net> <csv> [fps]  (backward compatible)
-//        default net is eno0
+//        default net is eth0
 
 #include <algorithm>
 #include <array>
@@ -107,7 +107,7 @@ int main(int argc, char const* argv[]) {
     if (argc < 2) {
         std::cout << "Usage: " << argv[0] << " <csv> [fps] [net]" << std::endl;
         std::cout << "   or: " << argv[0] << " <net> <csv> [fps]" << std::endl;
-        std::cout << "Default net: eno0" << std::endl;
+        std::cout << "Default net: eth0" << std::endl;
         std::cout << std::endl;
         std::cout << "Prerequisites:" << std::endl;
         std::cout << "  Robot must be in debug mode (motion controller OFF)." << std::endl;
@@ -115,7 +115,7 @@ int main(int argc, char const* argv[]) {
         return 1;
     }
 
-    std::string net = "eno0";
+    std::string net = "eth0";
     std::string csv_path;
     float fps = kDefaultFps;
 

@@ -3,7 +3,7 @@
 //
 // Usage: ./g1_mode_switch <mode> [net]
 //   mode: walk | passive | standup | squat | sit | zerotorque | damp
-//   Default net: eno0
+//   Default net: eth0
 
 #include <iostream>
 #include <string>
@@ -39,12 +39,12 @@ int main(int argc, char const* argv[]) {
         std::cout << "  zerotorque - Zero torque (FSM=0)" << std::endl;
         std::cout << "  damp       - Same as passive" << std::endl;
         std::cout << "  status     - Just print current FSM" << std::endl;
-        std::cout << "Default net: eno0" << std::endl;
+        std::cout << "Default net: eth0" << std::endl;
         return 1;
     }
 
     std::string mode = argv[1];
-    std::string net = (argc >= 3) ? argv[2] : "eno0";
+    std::string net = (argc >= 3) ? argv[2] : "eth0";
 
     unitree::robot::ChannelFactory::Instance()->Init(0, net);
 

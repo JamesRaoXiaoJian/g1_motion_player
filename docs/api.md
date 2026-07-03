@@ -30,7 +30,7 @@ client
 
 ```bash
 source .venv/bin/activate
-uvicorn api.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8001
 ```
 
 真实执行前必须先编译：
@@ -51,17 +51,15 @@ cmake --build build -j"$(nproc)"
 | `file` | file | 是 | - | CSV 文件 |
 | `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
 | `fps` | number | 否 | `50` | 回放帧率，范围 `(0, 240]` |
-| `net` | string | 否 | `eno0` | 机器人通信网卡 |
 | `dry_run` | bool | 否 | `true` | `true` 只校验，`false` 执行 |
 
 示例：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/replay \
+curl -X POST http://127.0.0.1:8001/api/replay \
   -F "file=@assets/wave.csv" \
   -F "save_as=wave_upload" \
   -F "fps=50" \
-  -F "net=eno0" \
   -F "dry_run=true"
 ```
 
@@ -74,7 +72,6 @@ curl -X POST http://127.0.0.1:8000/api/replay \
 | `csv_data` | string | 是 | - | CSV 文件完整文本 |
 | `save_as` | string | 否 | 自动生成 | 保存到 `assets/uploads/<save_as>.csv` |
 | `fps` | number | 否 | `50` | 回放帧率 |
-| `net` | string | 否 | `eno0` | 机器人通信网卡 |
 | `dry_run` | bool | 否 | `true` | 是否只校验 |
 
 示例：
@@ -88,13 +85,12 @@ payload = {
     "csv_data": Path("assets/wave.csv").read_text(encoding="utf-8"),
     "save_as": "wave_json_body",
     "fps": 50,
-    "net": "eno0",
     "dry_run": True,
 }
 Path("/tmp/replay.json").write_text(json.dumps(payload), encoding="utf-8")
 PY
 
-curl -X POST http://127.0.0.1:8000/api/replay \
+curl -X POST http://127.0.0.1:8001/api/replay \
   -H "Content-Type: application/json" \
   --data-binary @/tmp/replay.json
 ```
@@ -104,10 +100,37 @@ curl -X POST http://127.0.0.1:8000/api/replay \
 参数放在 query string：
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=50&net=eno0&dry_run=true" \
+curl -X POST "http://127.0.0.1:8001/api/replay?save_as=wave_raw&fps=50&dry_run=true" \
   -H "Content-Type: text/csv" \
   --data-binary @assets/wave.csv
 ```
+
+## 真机部署网卡
+
+API 不暴露 `net` 参数。机器人通信网卡属于 PC2 本机部署配置，不由外部调用方决定。服务端固定把仓库默认网卡传给：
+
+```bash
+build/csv_replay <csv文件> <fps> <net>
+```
+
+当前仓库默认网卡为 `eth0`。不同 PC2 的机器人通信网卡名可能不同，真机部署时先执行：
+
+```bash
+ip -br addr
+cmake --build build -j"$(nproc)" --target test_connection
+./build/test_connection eth0
+```
+
+如果连接测试输出 `PASSED.`，API 服务即可使用默认 `eth0`。本次 PC2 真机验证使用 `eth0`，`dry_run=true` 返回 `ok=true`，`dry_run=false` 返回 `replay.returncode=0`。
+
+如果另一台机器人 PC2 的通信网卡不是 `eth0`，需要在部署前同步修改：
+
+- `api/main.py` 里的 `DEFAULT_ROBOT_NET`。
+- `src/csv_replay.cpp` 里的默认 `net` 和帮助文本。
+- `src/test_connection.cpp` 里的默认网卡和注释。
+- 如果还使用调试/记录工具，同步修改 `src/csv_replay_debug.cpp`、`src/state_recorder.cpp`、`src/g1_mode_switch.cpp`。
+
+修改 C++ 默认值后需要重新编译；修改 API 默认值后需要重启 API 进程。外部电脑调用 API 时不需要、也不能指定网卡。
 
 ## 响应
 
@@ -126,7 +149,6 @@ curl -X POST "http://127.0.0.1:8000/api/replay?save_as=wave_raw&fps=50&net=eno0&
     "first_frame_arm_joints": [0.0868397],
     "source_type": "uploaded_csv",
     "fps": 50,
-    "net": "eno0",
     "dry_run": true
   },
   "error": null

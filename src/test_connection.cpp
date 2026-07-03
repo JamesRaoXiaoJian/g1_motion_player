@@ -1,6 +1,6 @@
 // Minimal G1 connection test
 // Usage: ./test_connection [network_interface]
-// Default interface: eno0
+// Default interface: eth0
 
 #include <chrono>
 #include <cstring>
@@ -12,7 +12,7 @@
 #include <unitree/robot/channel/channel_subscriber.hpp>
 
 int main(int argc, char** argv) {
-    std::string net = "eno0";
+    std::string net = "eth0";
     if (argc >= 2) net = argv[1];
     std::cout << "Connecting via " << net << "..." << std::endl;
     unitree::robot::ChannelFactory::Instance()->Init(0, net);

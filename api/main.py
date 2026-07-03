@@ -17,6 +17,7 @@ from .csv_motion import ASSETS_DIR, CsvMotionError, MotionMetadata, load_motion_
 
 MAX_CSV_BYTES = 10 * 1024 * 1024
 DEFAULT_REPLAY_FPS = 50.0
+DEFAULT_ROBOT_NET = "eth0"
 UPLOAD_DIR = ASSETS_DIR / "uploads"
 
 
@@ -34,7 +35,6 @@ class ReplayInput:
     save_as: str | None
     source_filename: str | None
     fps: float
-    net: str
     dry_run: bool
 
 
@@ -130,13 +130,6 @@ def _validate_fps(fps: float) -> float:
     return fps
 
 
-def _validate_net(net: Any) -> str:
-    value = "eno0" if net is None or net == "" else str(net).strip()
-    if not value:
-        raise ApiError("invalid_request", "net must not be empty.", 400)
-    return value
-
-
 def _decode_csv_bytes(raw: bytes) -> str:
     if len(raw) > MAX_CSV_BYTES:
         raise ApiError("invalid_request", "CSV payload is too large.", 413)
@@ -224,7 +217,6 @@ def _response_payload(metadata: MotionMetadata, replay_input: ReplayInput) -> di
         {
             "source_type": "uploaded_csv",
             "fps": replay_input.fps,
-            "net": replay_input.net,
             "dry_run": replay_input.dry_run,
             "duration_seconds": metadata.frames / replay_input.fps,
         }
@@ -254,7 +246,6 @@ async def _parse_json_body_replay_request(request: Request) -> ReplayInput:
         save_as=_json_value(payload, "save_as"),
         source_filename=None,
         fps=fps,
-        net=_validate_net(_json_value(payload, "net")),
         dry_run=_parse_bool(_json_value(payload, "dry_run"), "dry_run", True),
     )
 
@@ -292,7 +283,6 @@ async def _parse_multipart_replay_request(request: Request) -> ReplayInput:
         save_as=str(save_as) if save_as else None,
         source_filename=source_filename,
         fps=fps,
-        net=_validate_net(form.get("net")),
         dry_run=_parse_bool(form.get("dry_run"), "dry_run", True),
     )
 
@@ -307,7 +297,6 @@ async def _parse_raw_csv_replay_request(request: Request) -> ReplayInput:
         save_as=query.get("save_as"),
         source_filename=None,
         fps=fps,
-        net=_validate_net(query.get("net")),
         dry_run=_parse_bool(query.get("dry_run"), "dry_run", True),
     )
 
@@ -365,7 +354,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             repo_root=root,
             csv_path=data["csv_path"],
             fps=replay_input.fps,
-            net=replay_input.net,
+            net=DEFAULT_ROBOT_NET,
         )
         data["replay"] = result
         if result["returncode"] != 0:

@@ -33,7 +33,7 @@ def test_replay_accepts_json_body_csv_data_and_saves_upload(tmp_path: Path):
             "csv_data": _sample_csv_text(),
             "save_as": "json_upload",
             "fps": 60,
-            "net": "eth0",
+            "net": "wlan0",
             "dry_run": True,
         },
     )
@@ -46,7 +46,7 @@ def test_replay_accepts_json_body_csv_data_and_saves_upload(tmp_path: Path):
     assert body["data"]["csv_path"] == "assets/uploads/json_upload.csv"
     assert body["data"]["fps"] == 60
     assert body["data"]["duration_seconds"] == 10.0
-    assert body["data"]["net"] == "eth0"
+    assert "net" not in body["data"]
     assert body["data"]["dry_run"] is True
     assert body["data"]["frames"] == 600
     assert body["data"]["controlled_joint_count"] == 17
@@ -70,6 +70,7 @@ def test_replay_accepts_multipart_csv_upload(tmp_path: Path):
     assert body["data"]["csv_path"] == "assets/uploads/multipart_upload.csv"
     assert body["data"]["fps"] == 50
     assert body["data"]["duration_seconds"] == 12.0
+    assert "net" not in body["data"]
     assert body["data"]["frames"] == 600
     assert (tmp_path / "assets" / "uploads" / "multipart_upload.csv").exists()
 
@@ -87,7 +88,7 @@ def test_replay_dry_run_false_calls_csv_replay(monkeypatch, tmp_path: Path):
         assert repo_root == tmp_path.resolve()
         assert csv_path == "assets/uploads/run_upload.csv"
         assert fps == 50
-        assert net == "eno0"
+        assert net == "eth0"
         return {"returncode": 0, "stdout": "started", "stderr": ""}
 
     monkeypatch.setattr("api.main._run_csv_replay", fake_run_csv_replay)
@@ -97,7 +98,7 @@ def test_replay_dry_run_false_calls_csv_replay(monkeypatch, tmp_path: Path):
         json={
             "csv_data": _sample_csv_text(),
             "save_as": "run_upload",
-            "net": "eno0",
+            "net": "wlan0",
             "dry_run": False,
         },
     )
@@ -105,6 +106,7 @@ def test_replay_dry_run_false_calls_csv_replay(monkeypatch, tmp_path: Path):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
+    assert "net" not in body["data"]
     assert body["data"]["replay"]["stdout"] == "started"
 
 
