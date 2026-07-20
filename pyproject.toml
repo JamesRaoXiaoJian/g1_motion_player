@@ -2,7 +2,7 @@
 name = "g1-motion-player-api"
 version = "0.1.0"
 description = "Local HTTP API for G1 motion replay tools"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = [
   "fastapi>=0.115,<1",
   "python-multipart>=0.0.9,<1",

@@ -50,7 +50,7 @@ Recommended runtime environment:
 - x86_64 or aarch64
 - GCC 9.4+
 - CMake 3.5+
-- Python 3.9+
+- Python 3.8+ (3.9+ recommended)
 - Unitree G1 and the runtime machine on the same wired network
 
 Install basic system dependencies:
@@ -186,6 +186,30 @@ cmake --build build -j"$(nproc)"
 test -x build/csv_replay
 test -x build/state_recorder
 test -x build/test_connection
+```
+
+If you hit:
+
+```text
+Package 'g1-motion-player-api' requires a different Python
+```
+
+it usually means your virtualenv is using Python 3.8 while the package required higher in metadata before. The project now uses `requires-python >= 3.8`, and you can fix install by recreating the environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+If you prefer Python 3.9+, create the venv with that interpreter:
+
+```bash
+python3.9 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
 ## Safety Notes

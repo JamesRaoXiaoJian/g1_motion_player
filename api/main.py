@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,8 @@ def _content_type(request: Request) -> str:
 def _parse_float(value: Any, name: str, default: float) -> float:
     if value is None or value == "":
         return default
+    if isinstance(value, bool):
+        raise ApiError("invalid_request", f"{name} must be a number.", 400)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -121,6 +124,12 @@ def _parse_bool(value: Any, name: str, default: bool) -> bool:
 
 
 def _validate_fps(fps: float) -> float:
+    if not math.isfinite(fps):
+        raise ApiError(
+            "invalid_request",
+            "fps must be a finite number.",
+            400,
+        )
     if fps <= 0 or fps > 240:
         raise ApiError(
             "invalid_request",
@@ -241,9 +250,12 @@ async def _parse_json_body_replay_request(request: Request) -> ReplayInput:
         raise ApiError("invalid_request", "JSON body must include csv_data as a string.", 400)
 
     fps = _validate_fps(_parse_float(_json_value(payload, "fps"), "fps", DEFAULT_REPLAY_FPS))
+    save_as = _json_value(payload, "save_as")
+    if save_as is not None and not isinstance(save_as, str):
+        raise ApiError("invalid_request", "save_as must be a string.", 400)
     return ReplayInput(
         csv_text=_validate_csv_text(csv_text),
-        save_as=_json_value(payload, "save_as"),
+        save_as=save_as,
         source_filename=None,
         fps=fps,
         dry_run=_parse_bool(_json_value(payload, "dry_run"), "dry_run", True),

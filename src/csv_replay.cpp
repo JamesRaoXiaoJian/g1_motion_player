@@ -90,6 +90,91 @@ struct CsvFrame {
     std::array<float, 29> joints;
 };
 
+bool IsHeaderRow(const std::string& line) {
+    static const std::array<std::string, 36> kExpectedHeader = {
+        "root_pos_x", "root_pos_y", "root_pos_z", "root_quat_x", "root_quat_y",
+        "root_quat_z", "root_quat_w", "left_hip_pitch_joint",
+        "left_hip_roll_joint", "left_hip_yaw_joint", "left_knee_joint", "left_ankle_joint",
+        "left_ankle_roll_joint", "right_hip_pitch_joint", "right_hip_roll_joint",
+        "right_hip_yaw_joint", "right_knee_joint", "right_ankle_joint", "right_ankle_roll_joint",
+        "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+        "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
+        "left_wrist_yaw_joint", "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint", "right_elbow_joint", "right_wrist_roll_joint",
+        "right_wrist_pitch_joint", "right_wrist_yaw_joint"
+    };
+    const std::string kUtf8Bom = "\xEF\xBB\xBF";
+
+    std::vector<std::string> cells;
+    std::stringstream ss(line);
+    std::string cell;
+    while (std::getline(ss, cell, ',')) {
+        cells.push_back(cell);
+    }
+    if (cells.size() != kExpectedHeader.size()) {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        if (i == 0 && cells[i].rfind(kUtf8Bom, 0) == 0) {
+            cells[i] = cells[i].substr(kUtf8Bom.size());
+        }
+        if (cells[i] != kExpectedHeader[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ParseFps(const std::string& value, float& fps) {
+    try {
+        std::size_t parsed = 0;
+        fps = std::stof(value, &parsed);
+        if (parsed != value.size()) {
+            return false;
+        }
+    } catch (...) {
+        return false;
+    }
+    return std::isfinite(fps) && fps > 0.0f && fps <= 240.0f;
+}
+
+bool ParseCsvLine(
+    const std::string& line,
+    const std::string& csv_path,
+    std::size_t line_number,
+    CsvFrame& frame
+) {
+    std::vector<float> vals;
+    std::stringstream ss(line);
+    std::string cell;
+    while (std::getline(ss, cell, ',')) {
+        try {
+            float value = std::stof(cell);
+            if (!std::isfinite(value)) {
+                std::cerr << "ERROR: Non-finite value at " << csv_path << ":" << line_number << std::endl;
+                return false;
+            }
+            vals.push_back(value);
+        } catch (...) {
+            std::cerr << "ERROR: Invalid numeric value at " << csv_path << ":" << line_number << std::endl;
+            return false;
+        }
+    }
+
+    if (vals.size() != 36) {
+        std::cerr << "ERROR: Each frame must contain exactly 36 columns, got " << vals.size()
+                  << " at " << csv_path << ":" << line_number << std::endl;
+        return false;
+    }
+
+    for (int i = 0; i < 29; i++) {
+        frame.joints[i] = vals[7 + i];
+    }
+    return true;
+}
+
 std::vector<CsvFrame> LoadCsv(const std::string& path, float fps) {
     std::vector<CsvFrame> frames;
     std::ifstream file(path);
@@ -98,17 +183,17 @@ std::vector<CsvFrame> LoadCsv(const std::string& path, float fps) {
         return frames;
     }
     std::string line;
+    std::size_t line_number = 0;
     while (std::getline(file, line)) {
+        ++line_number;
         if (line.empty()) continue;
-        std::vector<float> vals;
-        std::stringstream ss(line);
-        std::string cell;
-        while (std::getline(ss, cell, ',')) {
-            try { vals.push_back(std::stof(cell)); } catch (...) { break; }
+        if (IsHeaderRow(line)) {
+            continue;
         }
-        if (vals.size() != 36) continue;
         CsvFrame f;
-        for (int i = 0; i < 29; i++) f.joints[i] = vals[7 + i];
+        if (!ParseCsvLine(line, path, line_number, f)) {
+            return {};
+        }
         frames.push_back(f);
     }
     std::cout << "Loaded " << frames.size() << " frames ("
@@ -136,10 +221,9 @@ int main(int argc, char const* argv[]) {
     if (is_csv_path(argv[1])) {
         csv_path = argv[1];
         if (argc >= 3) {
-            try {
-                fps = std::stof(argv[2]);
+            if (ParseFps(argv[2], fps)) {
                 if (argc >= 4) net = argv[3];
-            } catch (...) {
+            } else {
                 net = argv[2];
             }
         }
@@ -154,7 +238,10 @@ int main(int argc, char const* argv[]) {
         net = argv[1];
         csv_path = argv[2];
         if (argc >= 4) {
-            try { fps = std::stof(argv[3]); } catch (...) {}
+            if (!ParseFps(argv[3], fps)) {
+                std::cerr << "ERROR: invalid fps value: " << argv[3] << std::endl;
+                return 1;
+            }
         }
     }
 

@@ -58,7 +58,7 @@ g1_motion_player/
 - x86_64 或 aarch64
 - GCC 9.4+
 - CMake 3.5+
-- Python 3.9+
+- Python 3.8+（推荐 3.9+）
 - Unitree G1 与运行机器在同一有线网络
 
 安装基础依赖：
@@ -276,6 +276,28 @@ cmake --build build -j"$(nproc)"
 - G1 与 PC2 是否在同一有线网段。
 - `build/test_connection` 是否能正常连接。
 - 是否误用了默认 `dry_run=true`。真实执行要传 `dry_run=false`。
+
+### `Package 'g1-motion-player-api' requires a different Python`
+
+这是 `python3` 运行时版本不满足打包元数据要求导致的常见错误。该错误在你当前环境为 `Python 3.8.10` 时会出现历史版本的 `requires-python >=3.9` 限制。
+
+已修复后本项目支持 `Python 3.8+`，可直接按正常命令安装：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+如果你仍希望坚持 `Python 3.9+`，可改用该版本解释器创建虚拟环境：
+
+```bash
+python3.9 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
 
 ### CSV 被拒绝
 
