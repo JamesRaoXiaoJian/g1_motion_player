@@ -58,7 +58,7 @@ g1_motion_player/
 - x86_64 或 aarch64
 - GCC 9.4+
 - CMake 3.5+
-- Python 3.8+（推荐 3.9+）
+- Python 3.11+
 - Unitree G1 与运行机器在同一有线网络
 
 安装基础依赖：
@@ -83,6 +83,25 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
+```
+
+推荐使用 `uv` 管理 Python 环境（含 Linux 与 macOS 安装方式）：
+
+```bash
+# Linux:
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# macOS:
+brew install uv
+```
+
+安装完成后可按如下流程创建并安装依赖：
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install --upgrade pip
+uv pip install -e ".[dev]"
 ```
 
 编译 C++：
@@ -279,9 +298,9 @@ cmake --build build -j"$(nproc)"
 
 ### `Package 'g1-motion-player-api' requires a different Python`
 
-这是 `python3` 运行时版本不满足打包元数据要求导致的常见错误。该错误在你当前环境为 `Python 3.8.10` 时会出现历史版本的 `requires-python >=3.9` 限制。
+这是 `python3` 运行时版本不满足打包元数据要求导致的常见错误。该错误通常表示当前虚拟环境 Python 版本低于仓库要求的 `>=3.11`。
 
-已修复后本项目支持 `Python 3.8+`，可直接按正常命令安装：
+可按如下方式重新建环境后安装：
 
 ```bash
 python3 -m venv .venv
@@ -290,10 +309,10 @@ python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
-如果你仍希望坚持 `Python 3.9+`，可改用该版本解释器创建虚拟环境：
+如果仍希望使用其他版本解释器，可改用对应版本重新创建虚拟环境：
 
 ```bash
-python3.9 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"

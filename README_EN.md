@@ -50,7 +50,7 @@ Recommended runtime environment:
 - x86_64 or aarch64
 - GCC 9.4+
 - CMake 3.5+
-- Python 3.8+ (3.9+ recommended)
+- Python 3.11+
 - Unitree G1 and the runtime machine on the same wired network
 
 Install basic system dependencies:
@@ -75,6 +75,25 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
+```
+
+Recommended `uv` environment setup (Linux/macOS):
+
+```bash
+# Linux:
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# macOS:
+brew install uv
+```
+
+After installation, create the virtual environment and install dependencies with:
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install --upgrade pip
+uv pip install -e ".[dev]"
 ```
 
 Build C++ binaries:
@@ -194,7 +213,7 @@ If you hit:
 Package 'g1-motion-player-api' requires a different Python
 ```
 
-it usually means your virtualenv is using Python 3.8 while the package required higher in metadata before. The project now uses `requires-python >= 3.8`, and you can fix install by recreating the environment:
+it usually means your virtualenv is using a Python version below the project minimum (`>= 3.11`). Recreate your environment:
 
 ```bash
 python3 -m venv .venv
@@ -203,10 +222,10 @@ python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
-If you prefer Python 3.9+, create the venv with that interpreter:
+Create the venv with Python 3.11+:
 
 ```bash
-python3.9 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"

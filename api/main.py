@@ -210,7 +210,7 @@ def _store_uploaded_csv(
     uploads_dir.mkdir(parents=True, exist_ok=True)
     pending_path = final_path.with_name(f".{final_path.stem}.{uuid4().hex}.tmp")
     try:
-        pending_path.write_text(csv_text, encoding="utf-8", newline="")
+        pending_path.write_text(csv_text, encoding="utf-8")
         load_motion_csv(pending_path, repo_root=repo_root)
         pending_path.replace(final_path)
     except Exception:
