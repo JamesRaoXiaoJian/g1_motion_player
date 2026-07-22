@@ -150,6 +150,10 @@ ros2 run g1_motion_player_ros2 csv_replay_ros2 \
   assets/wave.csv --fps 50 --execute
 ```
 
+运行节点会持续检查 `/lowstate` 新鲜度、双臂与腰部跟踪误差、重复
+`/arm_sdk` publisher 和控制周期超时。异常时停止推进轨迹并平滑降低控制权重；
+具体阈值见 [ROS 2 Docker 开发指南](docs/ros2_docker.md)。
+
 完整环境配置、增量编译和网络排障见 [ROS 2 Docker 开发指南](docs/ros2_docker.md)。
 
 ### 路径二：原生 SDK2 C++

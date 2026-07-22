@@ -3,7 +3,7 @@
 #include <iostream>
 #include <vector>
 
-#include "src/replay_planner.hpp"
+#include "src/core/replay_planner.hpp"
 
 namespace {
 
