@@ -26,6 +26,14 @@ if(UNITREE_DDS_LIB_DIR)
 	link_directories("${CMAKE_BINARY_DIR}")
 endif()
 
+# Unitree SDK2 ships many standalone examples with additional optional
+# dependencies. Keep them out of the default project build; this repository
+# only needs the prebuilt SDK library and its headers for the local targets.
+option(G1MP_BUILD_UNITREE_SDK2_EXAMPLES
+       "Build the examples bundled with the Unitree SDK2 submodule" OFF)
+set(BUILD_EXAMPLES ${G1MP_BUILD_UNITREE_SDK2_EXAMPLES} CACHE BOOL
+    "Build Unitree SDK2 examples" FORCE)
+
 # Unitree SDK (submodule)
 add_subdirectory(thirdparty/unitree_sdk2)
 

@@ -171,6 +171,14 @@ cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ```
 
+默认只构建本项目程序及其必要 SDK2 依赖，不编译
+`thirdparty/unitree_sdk2/example/` 中的宇树官方示例。如需调试官方示例，可显式启用：
+
+```bash
+cmake -S . -B build -DG1MP_BUILD_UNITREE_SDK2_EXAMPLES=ON
+cmake --build build -j"$(nproc)"
+```
+
 主要产物：
 
 ```text
