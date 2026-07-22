@@ -11,6 +11,7 @@ The current `main` branch intentionally keeps only the CSV execution path:
 - C++ execution layer: `csv_replay` reads CSV frames and publishes commands through Unitree SDK DDS.
 - HTTP layer: FastAPI exposes only `POST /api/replay`, validates uploaded CSV data, saves it, and optionally invokes `csv_replay`.
 - Sample motions: `assets/wave.csv` and `assets/zuoyi.csv`.
+- ROS2 Docker runtime: pinned Foxy and CycloneDDS 0.10.2 for `/lowstate` and `/arm_sdk` communication.
 
 Older JSON replay and motion CRUD versions are archived in the remote branch `api-json-replay-archive`.
 
@@ -39,8 +40,39 @@ g1_motion_player/
 │   ├── state_recorder.cpp
 │   └── test_connection.cpp
 ├── tests/
-└── thirdparty/unitree_sdk2/    # git submodule
+├── docker/foxy/                # ROS2 Foxy utilities and control scripts
+├── docs/ros2_docker.md         # Docker workflow guide
+├── build_foxy_docker.sh
+├── run_foxy_docker.sh
+└── thirdparty/
+    ├── unitree_sdk2/           # SDK2 git submodule
+    └── unitree_ros2/           # vendored Unitree ROS2 source
 ```
+
+## Recommended ROS2 Docker workflow
+
+New development should use the pinned ROS2 Foxy Docker environment. The host does not need ROS2 Foxy installed.
+
+```bash
+./build_foxy_docker.sh
+./run_foxy_docker.sh
+```
+
+For a network interface other than `wlo1`:
+
+```bash
+UNITREE_NET_IFACE=wlan0 ./run_foxy_docker.sh
+```
+
+Inside the container:
+
+```bash
+ros2 topic echo /lowstate unitree_hg/msg/LowState
+python3 docker/foxy/measure_lowstate_rate.py --duration 10
+ros2 run g1_motion_player_ros2 csv_replay_ros2 assets/wave.csv
+```
+
+See [docs/ros2_docker.md](docs/ros2_docker.md) for the full workflow and safety requirements.
 
 ## Requirements
 

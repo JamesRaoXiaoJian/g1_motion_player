@@ -1,3 +1,6 @@
 [submodule "thirdparty/unitree_sdk2"]
 	path = thirdparty/unitree_sdk2
 	url = https://github.com/unitreerobotics/unitree_sdk2.git
+[submodule "thirdparty/unitree_ros2"]
+	path = thirdparty/unitree_ros2
+	url = https://github.com/unitreerobotics/unitree_ros2.git

@@ -16,7 +16,7 @@
 #include <thread>
 #include <vector>
 
-#include "replay_planner.hpp"
+#include "core/replay_planner.hpp"
 
 #include <unitree/idl/hg/LowCmd_.hpp>
 #include <unitree/idl/hg/LowState_.hpp>

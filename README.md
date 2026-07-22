@@ -11,6 +11,7 @@ Unitree G1 动作回放工具，用于把 CSV 关节动作安全地发送到 G1 
 - C++ 执行层：`csv_replay` 读取 CSV，通过 Unitree SDK DDS 话题 `rt/arm_sdk` 下发动作。
 - HTTP 接口层：FastAPI 只提供 `POST /api/replay`，从请求体接收 CSV 数据包，校验后保存并按需调用 `csv_replay`。
 - 示例动作：`assets/wave.csv`、`assets/zuoyi.csv`。
+- ROS2 Docker 执行层：固定 Foxy + CycloneDDS 0.10.2，通过 `/lowstate` 和 `/arm_sdk` 与 G1 通信。
 
 之前的动作查询、创建、更新、JSON replay 版本已归档到远端分支 `api-json-replay-archive`。主分支不再存放 JSON 动作数据，也不再构建 `json_replay`。
 
@@ -21,6 +22,7 @@ Unitree G1 动作回放工具，用于把 CSV 关节动作安全地发送到 G1 
 - FastAPI 仅暴露 `POST /api/replay`，默认关闭 `/docs`、`/redoc`、`/openapi.json`。
 - nearest-window 入口/退出选择和速度钳位，降低动作首尾姿态差异导致的冲击。
 - 附带 `state_recorder`、`test_connection` 和 API/CSV 单元测试。
+- 宇树官方 ROS2 消息与示例以 `thirdparty/unitree_ros2` 形式 vendoring，宿主机无需安装 Foxy。
 
 ## 执行策略
 
@@ -47,8 +49,55 @@ g1_motion_player/
 │   ├── state_recorder.cpp
 │   └── test_connection.cpp
 ├── tests/
-└── thirdparty/unitree_sdk2/    # git submodule
+├── docker/foxy/                # ROS2 Foxy 工具和控制脚本
+├── docs/ros2_docker.md         # ROS2 Docker 完整教程
+├── build_foxy_docker.sh
+├── run_foxy_docker.sh
+└── thirdparty/
+    ├── unitree_sdk2/           # SDK2 git submodule
+    └── unitree_ros2/           # 宇树 ROS2 消息与示例源码
 ```
+
+## 推荐：ROS2 Docker 开发
+
+新功能开发和跨机器部署推荐使用 Docker 内的 ROS2 Foxy。宿主机无需安装或切换 ROS2 版本。
+
+```bash
+sudo apt install -y docker.io
+sudo usermod -aG docker "$USER"
+newgrp docker
+
+./build_foxy_docker.sh
+./run_foxy_docker.sh
+```
+
+非 `wlo1` 网卡需要显式指定：
+
+```bash
+UNITREE_NET_IFACE=wlan0 ./run_foxy_docker.sh
+```
+
+进入容器后：
+
+```bash
+ros2 topic echo /lowstate unitree_hg/msg/LowState
+python3 docker/foxy/measure_lowstate_rate.py --duration 10
+python3 docker/foxy/read_upper_body.py --include-waist
+```
+
+ROS2 CSV 回放先做无控制校验：
+
+```bash
+ros2 run g1_motion_player_ros2 csv_replay_ros2 assets/wave.csv
+```
+
+确认机器人安全状态后才可执行：
+
+```bash
+ros2 run g1_motion_player_ros2 csv_replay_ros2 assets/wave.csv --execute
+```
+
+完整说明见 [docs/ros2_docker.md](docs/ros2_docker.md)。原有 SDK2 C++链路继续保留，但禁止与 ROS2 `/arm_sdk` publisher 同时运行。
 
 ## 环境要求
 

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_motion_player_ros2</name>
+  <version>0.1.0</version>
+  <description>ROS2 transport adapter for G1 CSV motion replay.</description>
+  <maintainer email="jamesraoxiaojian@gmail.com">james</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>unitree_hg</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
