@@ -1,166 +1,177 @@
 # G1 Motion Player
 
+```bash
+git clone --recurse-submodules https://github.com/JamesRaoXiaoJian/g1_motion_player.git
+cd g1_motion_player
+```
+
+已有仓库更新主项目和子模块：
+
+```bash
+git pull --recurse-submodules origin main
+git submodule update --init --recursive
+```
+
 <p align="center">
   <a href="README.md">中文</a> · <a href="README_EN.md">English</a>
 </p>
 
-Unitree G1 动作回放工具，用于把 CSV 关节动作安全地发送到 G1 上肢 `rt/arm_sdk` 控制链路。项目包含 C++ 实时执行程序、FastAPI 本地 HTTP 接口、CSV 校验逻辑、连接测试和示例动作，适合在 G1 PC2 或同一有线网段的 Ubuntu 机器上部署。
+Unitree G1 CSV 动作回放工具。项目提供 ROS 2 Docker、Unitree SDK2 C++ 和 FastAPI 三种使用入口，用于校验、保存和安全回放 G1 上肢动作。
 
-当前主分支只保留 CSV 执行链路：
+> [!WARNING]
+> 真实回放会控制机器人双臂和腰部。执行前必须确保机器人稳定、周围无人和障碍物，并准备好急停。ROS 2 与 SDK2 回放程序不能同时运行。
 
-- C++ 执行层：`csv_replay` 读取 CSV，通过 Unitree SDK DDS 话题 `rt/arm_sdk` 下发动作。
-- HTTP 接口层：FastAPI 只提供 `POST /api/replay`，从请求体接收 CSV 数据包，校验后保存并按需调用 `csv_replay`。
-- 示例动作：`assets/wave.csv`、`assets/zuoyi.csv`。
-- ROS2 Docker 执行层：固定 Foxy + CycloneDDS 0.10.2，通过 `/lowstate` 和 `/arm_sdk` 与 G1 通信。
+## 目录
 
-之前的动作查询、创建、更新、JSON replay 版本已归档到远端分支 `api-json-replay-archive`。主分支不再存放 JSON 动作数据，也不再构建 `json_replay`。
+- [项目概览](#项目概览)
+- [目录结构](#目录结构)
+- [快速开始](#快速开始)
+  - [路径一：ROS 2 Docker（推荐）](#路径一ros-2-docker推荐)
+  - [路径二：原生 SDK2 C++](#路径二原生-sdk2-c)
+  - [路径三：FastAPI](#路径三fastapi)
+- [CSV 格式](#csv-格式)
+- [回放安全策略](#回放安全策略)
+- [测试](#测试)
+- [常见问题](#常见问题)
+- [扩展文档](#扩展文档)
 
-## 功能亮点
+## 项目概览
 
-- CSV 动作校验、保存和执行，默认 `dry_run=true` 防止误触发真实机器人。
-- C++ `csv_replay` 使用 Unitree SDK DDS 直接向 `rt/arm_sdk` 下发动作。
-- FastAPI 仅暴露 `POST /api/replay`，默认关闭 `/docs`、`/redoc`、`/openapi.json`。
-- nearest-window 入口/退出选择和速度钳位，降低动作首尾姿态差异导致的冲击。
-- 附带 `state_recorder`、`test_connection` 和 API/CSV 单元测试。
-- 宇树官方 ROS2 消息与示例以 `thirdparty/unitree_ros2` 形式 vendoring，宿主机无需安装 Foxy。
+当前主分支聚焦 CSV 动作执行：
 
-## 执行策略
+- **ROS 2 回放**：`csv_replay_ros2` 订阅 `/lowstate`，向 `/arm_sdk` 发布 `unitree_hg/msg/LowCmd`。
+- **SDK2 回放**：`csv_replay` 通过 Unitree SDK DDS 直接使用 `rt/arm_sdk`。
+- **HTTP 接口**：FastAPI 提供 `POST /api/replay`，接收、校验和保存 CSV，并可调用 SDK2 回放程序。
+- **辅助工具**：包含状态记录、连接测试、CSV 校验和示例动作。
+- **示例数据**：`assets/wave.csv`、`assets/zuoyi.csv`。
 
-`csv_replay` 默认使用 nearest-window 策略：
+默认行为以安全为先：ROS 2 回放不带 `--execute` 时只校验；HTTP 接口默认 `dry_run=true`。
 
-- 进入动作时，在动作开头 2 秒窗口内选择最接近机器人当前姿态的帧作为入口。
-- 退出动作时，在动作结尾 2 秒窗口内选择最接近初始姿态的帧作为退出。
-- Transition 和 Replay 阶段都有速度钳位，减少初始姿态与动作首帧差异过大时的失衡。
+之前的动作查询、创建、更新及 JSON replay 版本保存在远端分支 `api-json-replay-archive`，主分支不再构建 `json_replay`。
 
 ## 目录结构
 
 ```text
 g1_motion_player/
 ├── api/
-│   ├── main.py                # FastAPI: POST /api/replay
-│   └── csv_motion.py          # CSV 校验与元数据解析
-├── assets/
-│   ├── wave.csv
-│   └── zuoyi.csv
+│   ├── main.py                    # FastAPI: POST /api/replay
+│   └── csv_motion.py              # CSV 校验与元数据解析
+├── assets/                        # 示例和上传的 CSV 动作
+├── docker/foxy/                   # ROS 2 Foxy 辅助脚本
+├── docs/                          # 部署与接口详细文档
 ├── src/
-│   ├── csv_replay.cpp         # 生产回放程序
-│   ├── csv_replay_debug.cpp   # rt/user_lowcmd 调试程序
-│   ├── g1_mode_switch.cpp
+│   ├── ros2/csv_replay_ros2.cpp   # ROS 2 回放程序
+│   ├── csv_replay.cpp             # SDK2 回放程序
 │   ├── state_recorder.cpp
 │   └── test_connection.cpp
 ├── tests/
-├── docker/foxy/                # ROS2 Foxy 工具和控制脚本
-├── docs/ros2_docker.md         # ROS2 Docker 完整教程
+├── thirdparty/
+│   ├── unitree_sdk2/              # Git submodule
+│   └── unitree_ros2/              # Git submodule
 ├── build_foxy_docker.sh
-├── run_foxy_docker.sh
-└── thirdparty/
-    ├── unitree_sdk2/           # SDK2 git submodule
-    └── unitree_ros2/           # 宇树 ROS2 消息与示例源码
+└── run_foxy_docker.sh
 ```
 
-## 推荐：ROS2 Docker 开发
+## 快速开始
 
-新功能开发和跨机器部署推荐使用 Docker 内的 ROS2 Foxy。宿主机无需安装或切换 ROS2 版本。
+本项目有三条独立使用路径。机器人控制开发推荐 ROS 2 Docker；部署已有 SDK2 程序可选原生 C++；只需要上传和校验动作时使用 FastAPI。
+
+### 路径一：ROS 2 Docker（推荐）
+
+Docker 固定使用 Ubuntu 20.04、ROS 2 Foxy 和 CycloneDDS 0.10.2，宿主机不需要安装 Foxy。
+
+#### 1. 安装 Docker
 
 ```bash
+sudo apt update
 sudo apt install -y docker.io
+sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"
 newgrp docker
+docker version
+```
 
+#### 2. 构建镜像和 ROS 2 工作区
+
+```bash
 ./build_foxy_docker.sh
+```
+
+该脚本执行两件事：
+
+1. 构建包含 Foxy、CycloneDDS 和编译工具的 Docker 镜像。
+2. 在临时容器中编译 Unitree 消息、示例及 `csv_replay_ros2`，产物保存到宿主机 `.foxy/install/`。
+
+修改 `src/ros2/` 后必须重新编译；`run_foxy_docker.sh` 只加载已有产物，不会自动构建。
+
+#### 3. 启动开发容器
+
+默认通信网卡为 `wlo1`：
+
+```bash
 ./run_foxy_docker.sh
 ```
 
-非 `wlo1` 网卡需要显式指定：
+使用其他网卡：
 
 ```bash
-UNITREE_NET_IFACE=wlan0 ./run_foxy_docker.sh
+UNITREE_NET_IFACE=eth0 ./run_foxy_docker.sh
 ```
 
-进入容器后：
+#### 4. 检查机器人通信
+
+以下命令在容器内执行：
 
 ```bash
+ros2 topic list
 ros2 topic echo /lowstate unitree_hg/msg/LowState
 python3 docker/foxy/measure_lowstate_rate.py --duration 10
 python3 docker/foxy/read_upper_body.py --include-waist
 ```
 
-ROS2 CSV 回放先做无控制校验：
+#### 5. 校验并回放 CSV
+
+先做无控制校验：
 
 ```bash
 ros2 run g1_motion_player_ros2 csv_replay_ros2 assets/wave.csv
 ```
 
-确认机器人安全状态后才可执行：
+确认机器人和环境安全后执行：
 
 ```bash
 ros2 run g1_motion_player_ros2 csv_replay_ros2 assets/wave.csv --execute
 ```
 
-完整说明见 [docs/ros2_docker.md](docs/ros2_docker.md)。原有 SDK2 C++链路继续保留，但禁止与 ROS2 `/arm_sdk` publisher 同时运行。
+自定义帧率：
 
-## 环境要求
+```bash
+ros2 run g1_motion_player_ros2 csv_replay_ros2 \
+  assets/wave.csv --fps 50 --execute
+```
 
-推荐在 G1 的 PC2 或同一有线网段的 Ubuntu 机器上运行：
+完整环境配置、增量编译和网络排障见 [ROS 2 Docker 开发指南](docs/ros2_docker.md)。
 
-- Ubuntu 20.04 / 22.04
-- x86_64 或 aarch64
-- GCC 9.4+
-- CMake 3.5+
-- Python 3.11+
-- Unitree G1 与运行机器在同一有线网络
+### 路径二：原生 SDK2 C++
 
-安装基础依赖：
+适用于 G1 PC2 或同一机器人网段中的 Ubuntu x86_64/aarch64 主机。
+
+#### 1. 安装依赖
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  git cmake g++ build-essential pkg-config \
-  python3 python3-venv python3-pip
+  git cmake g++ build-essential pkg-config
 ```
 
-拉取子模块：
-
-```bash
-git submodule update --init --recursive
-```
-
-Python 环境：
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
-```
-
-推荐使用 `uv` 管理 Python 环境（含 Linux 与 macOS 安装方式）：
-
-```bash
-# Linux:
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# macOS:
-brew install uv
-```
-
-安装完成后可按如下流程创建并安装依赖：
-
-```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install --upgrade pip
-uv pip install -e ".[dev]"
-```
-
-编译 C++：
+#### 2. 编译
 
 ```bash
 cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ```
 
-编译完成后至少应存在：
+主要产物：
 
 ```text
 build/csv_replay
@@ -168,65 +179,67 @@ build/state_recorder
 build/test_connection
 ```
 
-## 在 G1 PC2 上运行
+#### 3. 检查连接并回放
 
-完整部署步骤见 [docs/g1_robot_deployment.md](docs/g1_robot_deployment.md)。远端拉取和部署提示词见 [docs/remote_pull_prompt.md](docs/remote_pull_prompt.md)。
-
-先确认网卡名：
+先确认机器人通信网卡：
 
 ```bash
-ip link
+ip -brief address
+./build/test_connection eth0
 ```
 
-仓库默认机器人通信网卡是 `eth0`。如果 PC2 上机器人通信网卡是 `eth0`，可直接本地执行：
-
-```bash
-./build/csv_replay assets/wave.csv 50 eth0
-```
-
-命令格式：
+回放命令：
 
 ```bash
 ./build/csv_replay <csv文件> [fps] [网卡]
 ```
 
-常用示例：
+示例：
 
 ```bash
-./build/csv_replay assets/wave.csv
 ./build/csv_replay assets/wave.csv 50 eth0
 ./build/csv_replay assets/zuoyi.csv 50 eth0
 ```
 
-默认回放频率为 50Hz，贴近宇树官方 G1 `rt/arm_sdk` 示例。若要保持 600 帧动作按 10 秒播放，可显式传 `fps=60`。
+默认回放频率为 50 Hz。若需保持 600 帧动作按 10 秒播放，可指定 `fps=60`。
 
-## 启动 API
+> [!IMPORTANT]
+> `build/csv_replay` 是 SDK2 程序，`.foxy/install/.../csv_replay_ros2` 是 ROS 2 程序。两者使用不同构建环境，但最终都会占用 `arm_sdk` 控制链路，禁止同时启动。
 
-本机测试建议只绑定 `127.0.0.1`：
+### 路径三：FastAPI
+
+FastAPI 接收请求中的 CSV，完成校验、保存，并根据 `dry_run` 决定是否调用 `build/csv_replay`。使用 API 前需要先完成“原生 SDK2 C++”编译。
+
+#### 1. 创建 Python 环境
+
+要求 Python 3.11+：
 
 ```bash
+python3.11 -m venv .venv
 source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+#### 2. 启动服务
+
+仅本机访问：
+
+```bash
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8001
 ```
 
-如果要让同网段其他机器调用，再绑定 `0.0.0.0`，并确认网络只暴露在可信局域网：
+可信局域网访问：
 
 ```bash
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8001
 ```
 
-当前主分支没有内置认证；如果要开放到非本机环境，建议先在外层加反向代理认证或防火墙限制来源 IP。
-FastAPI 默认的 `/docs`、`/redoc`、`/openapi.json` 也已关闭，运行时只暴露 `POST /api/replay`。
+当前服务没有内置认证，且默认关闭 `/docs`、`/redoc` 和 `/openapi.json`。不要直接暴露到公网。
 
-## POST /api/replay
+#### 3. 调用 `POST /api/replay`
 
-接口只接收请求里的 CSV 数据，不接收动作名或 JSON motion 帧。
-
-默认 `dry_run=true`，只保存并校验 CSV，不执行机器人动作。真实执行必须显式传 `dry_run=false`，且 `build/csv_replay` 已编译存在。
-未传 `fps` 时默认按 50Hz 执行；需要按 60fps 原始时间尺度回放时，可以显式传 `fps=60`。
-API 不接收 `net` 参数；机器人通信网卡由 PC2 端仓库默认值决定，当前默认 `eth0`。如果另一台 PC2 的实际网卡不是 `eth0`，部署前修改默认网卡并重新编译/重启。
-
-### multipart 上传
+默认 `dry_run=true`，只校验和保存：
 
 ```bash
 curl -X POST http://127.0.0.1:8001/api/replay \
@@ -236,7 +249,7 @@ curl -X POST http://127.0.0.1:8001/api/replay \
   -F "dry_run=true"
 ```
 
-真实执行：
+确认安全后才可请求真实执行：
 
 ```bash
 curl -X POST http://127.0.0.1:8001/api/replay \
@@ -246,119 +259,100 @@ curl -X POST http://127.0.0.1:8001/api/replay \
   -F "dry_run=false"
 ```
 
-### JSON 请求体传 CSV 文本
-
-```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-payload = {
-    "csv_data": Path("assets/wave.csv").read_text(encoding="utf-8"),
-    "save_as": "wave_json_body",
-    "fps": 50,
-    "dry_run": True,
-}
-Path("/tmp/replay.json").write_text(json.dumps(payload), encoding="utf-8")
-PY
-
-curl -X POST http://127.0.0.1:8001/api/replay \
-  -H "Content-Type: application/json" \
-  --data-binary @/tmp/replay.json
-```
-
-### raw text/csv
-
-```bash
-curl -X POST "http://127.0.0.1:8001/api/replay?save_as=wave_raw&fps=50&dry_run=true" \
-  -H "Content-Type: text/csv" \
-  --data-binary @assets/wave.csv
-```
-
-成功响应会包含保存路径：
-
-```json
-{
-  "ok": true,
-  "data": {
-    "name": "wave_upload",
-    "csv_path": "assets/uploads/wave_upload.csv",
-    "frames": 600,
-    "duration_seconds": 12.0,
-    "columns": 36,
-    "controlled_joint_count": 17,
-    "first_frame_arm_joints": [0.0868397],
-    "source_type": "uploaded_csv",
-    "fps": 50,
-    "dry_run": true
-  },
-  "error": null
-}
-```
-
-上传文件会保存在 `assets/uploads/`。非法 CSV 会被拒绝，不会留下最终文件。
+接口还支持 JSON 请求体中的 `csv_data` 和 `text/csv` 原始请求。完整字段及响应格式见 [API 文档](docs/api.md)。上传文件保存在 `assets/uploads/`；非法 CSV 会被拒绝且不会留下最终文件。
 
 ## CSV 格式
 
-每行必须是 36 列 UTF-8 数值，可带一行标准表头：
+CSV 使用 UTF-8 编码，每行必须包含 36 个有限数值，可带一行标准表头：
 
-- 0-6：root position + quaternion，当前回放忽略。
-- 7-18：下肢 12 关节，当前回放不主动驱动。
-- 19-21：腰部 3 DOF。
-- 22-28：左臂 7 DOF。
-- 29-35：右臂 7 DOF。
+| 列范围 | 内容 | 当前是否驱动 |
+|---|---|---|
+| 0–6 | Root position + quaternion | 否 |
+| 7–18 | 下肢 12 关节 | 否 |
+| 19–21 | 腰部 3 DOF | 是 |
+| 22–28 | 左臂 7 DOF | 是 |
+| 29–35 | 右臂 7 DOF | 是 |
 
-`csv_replay` 实际驱动上肢和腰部 17 个关节。
+回放程序实际控制双臂和腰部共 17 个关节。空行会被忽略；列数错误、非数值和非有限值会被拒绝。
 
-## 测试与检查
+## 回放安全策略
+
+回放程序默认使用 nearest-window 策略：
+
+- 在动作开头约 2 秒窗口内选择最接近机器人当前姿态的入口帧。
+- 在动作结尾约 2 秒窗口内选择最接近初始姿态的退出帧。
+- Transition 和 Replay 阶段均执行速度钳位。
+- ROS 2 程序在退出时渐出控制权并回到初始上肢姿态。
+
+这些策略用于降低首尾姿态突变，但不能替代现场安全检查和急停措施。
+
+## 测试
+
+Python 和规划逻辑测试：
 
 ```bash
+source .venv/bin/activate
 python3 -m compileall -q api tests
 python3 -m pytest
+
 g++ -std=c++17 -I. tests/replay_planner_test.cpp -o /tmp/replay_planner_test
 /tmp/replay_planner_test
 ```
 
-如果本机没有安装 Python 依赖，先执行：
-
-```bash
-python -m pip install -e ".[dev]"
-```
+ROS 2 通信测试应在 Foxy Docker 内执行，SDK2 连接测试使用 `build/test_connection`。
 
 ## 常见问题
 
+### 子模块目录为空
+
+```bash
+git submodule update --init --recursive
+```
+
 ### `csv_replay binary not found`
 
-先编译：
+这是 FastAPI 需要的 SDK2 程序，重新执行：
 
 ```bash
 cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ```
 
-### 机器人没有动作
+### 修改 `csv_replay_ros2.cpp` 后没有生效
 
-检查：
-
-- 仓库默认网卡是否是实际机器人通信网卡；当前默认 `eth0`。
-- G1 与 PC2 是否在同一有线网段。
-- `build/test_connection` 是否能正常连接。
-- 是否误用了默认 `dry_run=true`。真实执行要传 `dry_run=false`。
-
-### `Package 'g1-motion-player-api' requires a different Python`
-
-这是 `python3` 运行时版本不满足打包元数据要求导致的常见错误。该错误通常表示当前虚拟环境 Python 版本低于仓库要求的 `>=3.11`。
-
-可按如下方式重新建环境后安装：
+`.cpp` 不能直接运行。Docker 启动脚本也不会自动编译，需要重新运行：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
+./build_foxy_docker.sh
 ```
 
-如果仍希望使用其他版本解释器，可改用对应版本重新创建虚拟环境：
+然后重新进入容器并检查实际可执行文件：
+
+```bash
+ros2 pkg executables g1_motion_player_ros2
+```
+
+### Docker socket permission denied
+
+```bash
+sudo usermod -aG docker "$USER"
+newgrp docker
+docker version
+```
+
+### 机器人没有动作
+
+依次检查：
+
+- 运行参数是否仍处于校验模式：ROS 2 需要 `--execute`，API 需要 `dry_run=false`。
+- `UNITREE_NET_IFACE` 或 SDK2 网卡参数是否与机器人通信网卡一致。
+- `/lowstate` 是否持续发布，或 `build/test_connection` 是否连接成功。
+- 是否已有其他 `/arm_sdk`、`rt/arm_sdk` publisher 占用控制链路。
+- 机器人当前模式、支撑状态和急停条件是否满足执行要求。
+
+### Python 版本不满足要求
+
+若出现 `requires a different Python`，使用 Python 3.11+ 重建虚拟环境：
 
 ```bash
 python3.11 -m venv .venv
@@ -367,6 +361,10 @@ python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
-### CSV 被拒绝
+## 扩展文档
 
-CSV 必须是 UTF-8、每行 36 列、所有值都能解析为有限数值。空行会被跳过，标准表头会被跳过。
+- [ROS 2 Docker 开发指南](docs/ros2_docker.md)
+- [G1 实机部署指南](docs/g1_robot_deployment.md)
+- [HTTP API 文档](docs/api.md)
+- [远端拉取与部署提示](docs/remote_pull_prompt.md)
+- [English README](README_EN.md)
